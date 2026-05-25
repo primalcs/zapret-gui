@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net11.0-windows</TargetFramework>
+    <RootNamespace>zapret_gui</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <CETCompat>false</CETCompat>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Fail loudly when zapret-gui.exe is locked (stale apphost → 0xc0000142 with new DLL). -->
+    <CopyRetryCount>20</CopyRetryCount>
+    <CopyRetryDelayMilliseconds>1000</CopyRetryDelayMilliseconds>
+    <ErrorOnCopyRetryFailure>true</ErrorOnCopyRetryFailure>
+  </PropertyGroup>
+
+</Project>
