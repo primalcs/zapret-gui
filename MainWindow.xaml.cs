@@ -15,31 +15,246 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _zapretOperationCts;
     private System.Windows.Controls.Button? _runningZapretButton;
     private string? _runningZapretButtonOriginalContent;
+    private bool _isApplyingLanguage;
+    private string? _checkForUpdateBusyLabel;
 
     public MainWindow()
     {
         InitializeComponent();
+
+        LanguageComboBox.ItemsSource = LanguageOption.All;
+        LanguageComboBox.SelectedItem = LanguageOption.All.First(o => o.Language == Loc.Current);
+
+        Loc.Changed += (_, _) => Dispatcher.Invoke(ApplyLocalization);
+
+        ApplyLocalization();
         ZapretPathTextBox.Text = App.Settings.ZapretPath;
         UpdateInstalledVersionFromFolder(App.Settings.ZapretPath);
 
         RegisterZapretActionControl(InstallServiceButton);
         RegisterZapretActionControl(RemoveServiceButton);
+        RegisterZapretActionControl(TurnOffButton);
         RegisterZapretActionControl(CheckStatusButton);
         RegisterZapretActionControl(StrategyComboBox);
         RegisterZapretActionControl(UpdateIpSetListButton);
         RegisterZapretActionControl(UpdateHostsFileButton);
         RegisterZapretActionControl(RunDiagnosticsButton);
         RegisterZapretActionControl(RunConnectivityTestsButton);
+        RegisterZapretActionControl(DoEverythingButton);
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e) =>
         RefreshZapretSections();
 
+    private async void DoEverythingButton_Click(object sender, RoutedEventArgs e) =>
+        await DoEverythingAsync();
+
+    private async Task DoEverythingAsync()
+    {
+        if (_isBusy)
+            return;
+
+        var zapretPath = ResolveDoEverythingZapretPath();
+        RefreshZapretSections();
+        AdvancedExpander.IsExpanded = true;
+
+        SetBusy(true);
+        ServiceOutputTextBox.Text = Loc.Running;
+        _zapretOperationCts = new CancellationTokenSource();
+        SetZapretOperationUi(DoEverythingButton, isRunning: true);
+        var cancellationToken = _zapretOperationCts.Token;
+
+        try
+        {
+            if (ZapretBatRunner.IsZapretFolder(zapretPath))
+                await RemoveServicesQuietlyAsync(cancellationToken);
+
+            if (!await CheckAndUpdateIfNeededAsync(zapretPath, cancellationToken, manageBusy: false))
+                return;
+
+            var runner = new ZapretBatRunner(zapretPath);
+            if (!runner.ValidateFolderOrWarn())
+                return;
+
+            await RemoveServicesQuietlyAsync(cancellationToken);
+
+            var strategyCount = runner.InstallableBatFiles.Count;
+            const int firstServiceNumber = 9;
+            var succeeded = false;
+
+            for (var serviceNumber = firstServiceNumber; serviceNumber <= strategyCount; serviceNumber++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var installResult = await RunZapretBatAsync(
+                    (r, ct) => ZapretServiceCommands.InstallServiceByMenuIndexAsync(r, serviceNumber, ct),
+                    showErrors: false,
+                    manageBusy: false,
+                    cancellationToken: cancellationToken);
+                if (installResult is null)
+                    return;
+
+                SetZapretOutput(
+                    Loc.InstallService,
+                    installResult.Value,
+                    ServiceMenuOperation.Install);
+
+                var statusResult = await RunZapretBatAsync(
+                    (r, ct) => ZapretServiceCommands.CheckStatusAsync(r, ct),
+                    showErrors: false,
+                    manageBusy: false,
+                    cancellationToken: cancellationToken);
+                if (statusResult is null)
+                    return;
+
+                SetZapretOutput(Loc.CheckStatus, statusResult.Value, ServiceMenuOperation.CheckStatus);
+
+                if (ZapretServiceCommands.IsServiceRunningSuccessfully(statusResult.Value))
+                {
+                    await ShowBannerBrieflyAsync(Loc.DoEverythingSuccess, isSuccess: true);
+                    succeeded = true;
+                    break;
+                }
+
+                await ShowBannerBrieflyAsync(
+                    Loc.DoEverythingServiceFailed(serviceNumber),
+                    isSuccess: false);
+
+                if (serviceNumber < strategyCount)
+                    await RemoveServicesQuietlyAsync(cancellationToken);
+            }
+
+            if (!succeeded)
+                await ShowBannerBrieflyAsync(Loc.DoEverythingFailed, isSuccess: false);
+        }
+        catch (OperationCanceledException)
+        {
+            ServiceOutputTextBox.Text = Loc.OperationCancelled;
+        }
+        finally
+        {
+            SetZapretOperationUi(DoEverythingButton, isRunning: false);
+            _zapretOperationCts?.Dispose();
+            _zapretOperationCts = null;
+            SetBusy(false);
+            RefreshZapretSections();
+        }
+    }
+
+    private async Task RemoveServicesQuietlyAsync(CancellationToken cancellationToken)
+    {
+        var removeResult = await RunZapretBatAsync(
+            (r, ct) => ZapretServiceCommands.RemoveServicesAsync(r, ct),
+            showErrors: false,
+            manageBusy: false,
+            cancellationToken: cancellationToken);
+        if (removeResult is not null)
+            SetZapretOutput(Loc.RemoveServices, removeResult.Value, ServiceMenuOperation.Remove);
+    }
+
+    private async Task<bool> CheckAndUpdateIfNeededAsync(
+        string destinationPath,
+        CancellationToken cancellationToken,
+        bool manageBusy = true)
+    {
+        SetUpdateProgressUi(true, Loc.Checking, manageBusy);
+        try
+        {
+            _latestRelease = await ReleaseUpdateService.GetLatestReleaseAsync(cancellationToken);
+            var latestVersion = _latestRelease.TagName;
+            var installedVersion = App.Settings.InstalledVersion;
+            var folderMissing = !IsZapretFolder(destinationPath);
+
+            if (!folderMissing && !ZapretVersion.IsNewer(latestVersion, installedVersion))
+                return true;
+
+            SetUpdateProgressUi(true, Loc.Updating, manageBusy);
+            var downloadUrl = ReleaseUpdateService.GetZipDownloadUrl(_latestRelease);
+            if (string.IsNullOrWhiteSpace(downloadUrl))
+                throw new InvalidOperationException(Loc.LatestReleaseNoZip);
+
+            await ReleaseUpdateService.DownloadAndExtractAsync(
+                downloadUrl,
+                destinationPath,
+                cancellationToken);
+
+            App.Settings.InstalledVersion = _latestRelease.TagName;
+            SettingsStore.Save(App.Settings);
+            await ShowBannerBrieflyAsync(Loc.UpdatedSuccessfully, isSuccess: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            System.Windows.MessageBox.Show(
+                Loc.UpdateCheckFailedBody(ex.Message),
+                Loc.UpdateCheckFailedTitle,
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return false;
+        }
+        finally
+        {
+            SetUpdateProgressUi(false, checkButtonText: null, manageBusy);
+        }
+    }
+
+    private void LanguageComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_isApplyingLanguage || LanguageComboBox.SelectedItem is not LanguageOption option)
+            return;
+
+        if (option.Language == Loc.Current)
+            return;
+
+        Loc.SetLanguage(option.Language);
+        App.Settings.Language = Loc.LanguageCode;
+        SettingsStore.Save(App.Settings);
+    }
+
+    private void ApplyLocalization()
+    {
+        _isApplyingLanguage = true;
+        try
+        {
+            Title = Loc.WindowTitle;
+            DoEverythingButton.Content = Loc.DoEverything;
+            TurnOffButton.Content = Loc.TurnOff;
+            AdvancedExpander.Header = Loc.Advanced;
+            PathToZapretLabel.Content = Loc.PathToZapret;
+            BrowseButton.Content = Loc.Browse;
+            CheckForUpdateButton.Content = _checkForUpdateBusyLabel ?? Loc.CheckForUpdate;
+            UpdateButton.Content = Loc.Update;
+            ServiceTab.Header = Loc.TabService;
+            ListsTab.Header = Loc.TabLists;
+            DiagnosticsTab.Header = Loc.TabDiagnostics;
+            StrategyForInstallLabel.Content = Loc.StrategyForInstall;
+            InstallServiceButton.Content = Loc.InstallService;
+            RemoveServiceButton.Content = Loc.RemoveServices;
+            CheckStatusButton.Content = Loc.CheckStatus;
+            UpdateIpSetListButton.Content = Loc.UpdateIpSetList;
+            UpdateHostsFileButton.Content = Loc.UpdateHostsFile;
+            ConnectivityTestsHintTextBlock.Text = Loc.ConnectivityTestsHint;
+            RunDiagnosticsButton.Content = Loc.RunDiagnostics;
+            RunConnectivityTestsButton.Content = Loc.RunConnectivityTests;
+            CancelZapretOperationButton.Content = Loc.Cancel;
+            OutputLabel.Content = Loc.Output;
+
+            if (_runningZapretButton is not null)
+                _runningZapretButton.Content = Loc.Running;
+
+            RefreshZapretSections();
+        }
+        finally
+        {
+            _isApplyingLanguage = false;
+        }
+    }
+
     private void BrowseButton_Click(object sender, RoutedEventArgs e)
     {
         using var dialog = new WinForms.FolderBrowserDialog
         {
-            Description = "Select folder containing zapret",
+            Description = Loc.SelectFolderDescription,
             UseDescriptionForTitle = true
         };
 
@@ -83,7 +298,7 @@ public partial class MainWindow : Window
         if (_isBusy)
             return;
 
-        SetUpdateBusy(true, "Checking...");
+        SetUpdateBusy(true, Loc.Checking);
         try
         {
             _latestRelease = await ReleaseUpdateService.GetLatestReleaseAsync();
@@ -93,13 +308,13 @@ public partial class MainWindow : Window
             if (ZapretVersion.IsNewer(latestVersion, installedVersion))
                 ShowUpdateBanner(latestVersion);
             else
-                await ShowLatestVersionBannerAsync(installedVersion);
+                await ShowBannerBrieflyAsync(Loc.StoredVersionLatest(installedVersion));
         }
         catch (Exception ex)
         {
             System.Windows.MessageBox.Show(
-                $"Failed to check for updates.\n\n{ex.Message}",
-                "Update check failed",
+                Loc.UpdateCheckFailedBody(ex.Message),
+                Loc.UpdateCheckFailedTitle,
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -118,33 +333,33 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(destinationPath))
         {
             System.Windows.MessageBox.Show(
-                "Set path to desired zapret location first",
-                "Update",
+                Loc.SetPathFirst,
+                Loc.Update,
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
         }
 
-        SetUpdateBusy(true, "Updating...");
+        SetUpdateBusy(true, Loc.Updating);
         try
         {
             _latestRelease ??= await ReleaseUpdateService.GetLatestReleaseAsync();
 
             var downloadUrl = ReleaseUpdateService.GetZipDownloadUrl(_latestRelease);
             if (string.IsNullOrWhiteSpace(downloadUrl))
-                throw new InvalidOperationException("Latest release does not include a .zip download.");
+                throw new InvalidOperationException(Loc.LatestReleaseNoZip);
 
             await ReleaseUpdateService.DownloadAndExtractAsync(downloadUrl, destinationPath);
 
             App.Settings.InstalledVersion = _latestRelease.TagName;
             SettingsStore.Save(App.Settings);
-            await ShowBannerBrieflyAsync("Updated successfully");
+            await ShowBannerBrieflyAsync(Loc.UpdatedSuccessfully);
         }
         catch (Exception ex)
         {
             System.Windows.MessageBox.Show(
-                $"Update failed.\n\n{ex.Message}",
-                "Update failed",
+                Loc.UpdateFailedBody(ex.Message),
+                Loc.UpdateFailedTitle,
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -154,41 +369,35 @@ public partial class MainWindow : Window
         }
     }
 
-    private Task ShowLatestVersionBannerAsync(string version) =>
-        ShowBannerBrieflyAsync($"Stored version is {version} - latest");
-
-    private void ShowUpdateBanner(string version)
-    {
-        _bannerHideCts?.Cancel();
-        SetBannerStyle(isSuccess: false);
-        UpdateBannerText.Text = $"New version {version} is available.";
-        UpdateBanner.Visibility = Visibility.Visible;
-    }
-
-    private async Task ShowBannerBrieflyAsync(string message)
+    private Task ShowBannerBrieflyAsync(string message, bool isSuccess = true)
     {
         _bannerHideCts?.Cancel();
         _bannerHideCts = new CancellationTokenSource();
         var cancellationToken = _bannerHideCts.Token;
 
-        SetBannerStyle(isSuccess: true);
+        SetBannerStyle(isSuccess);
         UpdateBannerText.Text = message;
         UpdateBanner.Visibility = Visibility.Visible;
 
-        try
+        return Task.Run(async () =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
-            UpdateBanner.Visibility = Visibility.Collapsed;
-        }
-        catch (OperationCanceledException)
-        {
-        }
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+                await Dispatcher.InvokeAsync(() => UpdateBanner.Visibility = Visibility.Collapsed);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
     }
 
-    private void HideUpdateBanner()
+    private void ShowUpdateBanner(string version)
     {
         _bannerHideCts?.Cancel();
-        UpdateBanner.Visibility = Visibility.Collapsed;
+        SetBannerStyle(isSuccess: false);
+        UpdateBannerText.Text = Loc.NewVersionAvailable(version);
+        UpdateBanner.Visibility = Visibility.Visible;
     }
 
     private void SetBannerStyle(bool isSuccess)
@@ -215,45 +424,58 @@ public partial class MainWindow : Window
     public async Task<ZapretBatResult?> RunZapretBatAsync(
         Func<ZapretBatRunner, CancellationToken, Task<ZapretBatResult>> run,
         System.Windows.Controls.Button? runningButton = null,
-        bool showErrorDialog = true,
-        bool treatNonZeroExitAsFailure = false,
-        Func<ZapretBatResult, bool>? indicatesFailure = null)
+        bool showErrors = true,
+        bool manageBusy = true,
+        CancellationToken cancellationToken = default)
     {
-        if (_isBusy)
+        if (manageBusy && _isBusy)
             return null;
 
         var runner = new ZapretBatRunner(GetZapretPath());
         if (!runner.ValidateFolderOrWarn())
             return null;
 
-        indicatesFailure ??= ZapretServiceCommands.IndicatesFailureForMenuAction;
-        SetBusy(true);
-        ServiceOutputTextBox.Text = WindowsElevation.RunningStatusMessage;
-        _zapretOperationCts = new CancellationTokenSource();
+        CancellationTokenSource? ownedCts = null;
+        if (manageBusy)
+        {
+            SetBusy(true);
+            ServiceOutputTextBox.Text = Loc.Running;
+            ownedCts = new CancellationTokenSource();
+            _zapretOperationCts = ownedCts;
+        }
+
         if (runningButton is not null)
             SetZapretOperationUi(runningButton, isRunning: true);
 
+        var token = ownedCts?.Token ?? cancellationToken;
+
         try
         {
-            var result = await run(runner, _zapretOperationCts.Token).ConfigureAwait(true);
-            if (showErrorDialog &&
-                result.ExitCode != -1 &&
-                (indicatesFailure(result) || (treatNonZeroExitAsFailure && !result.Success)))
+            var result = await run(runner, token).ConfigureAwait(true);
+            if (showErrors && ZapretServiceCommands.IndicatesFailure(result))
                 ShowZapretBatError(result);
             return result;
         }
         catch (OperationCanceledException)
         {
-            return new ZapretBatResult(-1, "", "Operation cancelled.");
+            return new ZapretBatResult(-1, "", Loc.OperationCancelled);
         }
         finally
         {
             if (runningButton is not null)
                 SetZapretOperationUi(runningButton, isRunning: false);
-            _zapretOperationCts?.Dispose();
-            _zapretOperationCts = null;
-            SetBusy(false);
-            RefreshZapretSections();
+            if (ownedCts is not null)
+            {
+                ownedCts.Dispose();
+                if (ReferenceEquals(_zapretOperationCts, ownedCts))
+                    _zapretOperationCts = null;
+            }
+
+            if (manageBusy)
+            {
+                SetBusy(false);
+                RefreshZapretSections();
+            }
         }
     }
 
@@ -266,7 +488,7 @@ public partial class MainWindow : Window
         {
             _runningZapretButton = runningButton;
             _runningZapretButtonOriginalContent = runningButton.Content?.ToString() ?? "";
-            runningButton.Content = "Running...";
+            runningButton.Content = Loc.Running;
             CancelZapretOperationButton.Visibility = Visibility.Visible;
             CancelZapretOperationButton.IsEnabled = true;
             return;
@@ -281,17 +503,9 @@ public partial class MainWindow : Window
 
     private static void ShowZapretBatError(ZapretBatResult result)
     {
-        var details = string.Join(
-            "\n\n",
-            new[] { result.StdOut, result.StdErr }
-                .Where(text => !string.IsNullOrWhiteSpace(text)));
-
-        if (string.IsNullOrWhiteSpace(details))
-            details = $"Exit code: {result.ExitCode}";
-
         System.Windows.MessageBox.Show(
-            details,
-            "Zapret command failed",
+            ZapretServiceCommands.FormatErrorOutput(result),
+            Loc.ZapretCommandFailed,
             MessageBoxButton.OK,
             MessageBoxImage.Error);
     }
@@ -303,15 +517,23 @@ public partial class MainWindow : Window
         UpdateButton.IsEnabled = !busy;
         BrowseButton.IsEnabled = !busy;
         ZapretPathTextBox.IsEnabled = !busy;
+        DoEverythingButton.IsEnabled = !busy;
+        LanguageComboBox.IsEnabled = !busy;
 
         foreach (var control in _zapretActionControls)
             control.IsEnabled = !busy;
     }
 
-    private void SetUpdateBusy(bool busy, string? checkButtonText = null)
+    private void SetUpdateBusy(bool busy, string? checkButtonText = null) =>
+        SetUpdateProgressUi(busy, checkButtonText, manageBusy: true);
+
+    private void SetUpdateProgressUi(bool busy, string? checkButtonText, bool manageBusy)
     {
-        SetBusy(busy);
-        CheckForUpdateButton.Content = checkButtonText ?? "Check for update";
+        if (manageBusy)
+            SetBusy(busy);
+
+        _checkForUpdateBusyLabel = busy ? checkButtonText : null;
+        CheckForUpdateButton.Content = checkButtonText ?? Loc.CheckForUpdate;
     }
 
     private void UpdateInstalledVersionFromFolder(string path)
@@ -342,6 +564,9 @@ public partial class MainWindow : Window
     private async void InstallServiceButton_Click(object sender, RoutedEventArgs e) =>
         await InstallServiceAsync();
 
+    private async void TurnOffButton_Click(object sender, RoutedEventArgs e) =>
+        await RemoveServiceAsync();
+
     private async void RemoveServiceButton_Click(object sender, RoutedEventArgs e) =>
         await RemoveServiceAsync();
 
@@ -366,19 +591,8 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(selectedBat))
         {
             System.Windows.MessageBox.Show(
-                "Select a strategy .bat file first.",
-                "Install service",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
-
-        var path = GetZapretPath();
-        if (ZapretServiceCommands.GetInstallMenuIndex(path, selectedBat) is null)
-        {
-            System.Windows.MessageBox.Show(
-                $"\"{selectedBat}\" is not in the service.bat install file list.",
-                "Install service",
+                Loc.SelectStrategyFirst,
+                Loc.InstallService,
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
@@ -389,33 +603,11 @@ public partial class MainWindow : Window
             var result = await RunZapretBatAsync(
                 (runner, ct) => ZapretServiceCommands.InstallServiceAsync(runner, selectedBat, ct));
             if (result is not null)
-            {
-                SetZapretOutput("Install service", result.Value);
-                if (!ZapretServiceCommands.IndicatesInstallCompleted(result.Value))
-                {
-                    var hasStatusOnly = ZapretServiceCommands.FormatCheckStatusOutput(result.Value)
-                        .Contains("RUNNING", StringComparison.OrdinalIgnoreCase);
-                    System.Windows.MessageBox.Show(
-                        hasStatusOnly
-                            ? "The log shows Check status output, not install (Pick one / Final args / sc create). " +
-                              "The service may already be installed — use Check status, or retry Install."
-                            : "The install step did not finish (no service registration in the log). " +
-                              "Check the output panel and %LocalAppData%\\zapret-gui\\last-run.log, then retry.",
-                        "Install service",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                }
-            }
-
-            RefreshInstalledStrategy();
+                SetZapretOutput(Loc.InstallService, result.Value, ServiceMenuOperation.Install);
         }
         catch (ArgumentException ex)
         {
-            System.Windows.MessageBox.Show(
-                ex.Message,
-                "Install service",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(ex.Message, Loc.InstallService, MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -424,27 +616,7 @@ public partial class MainWindow : Window
         var result = await RunZapretBatAsync(
             (runner, ct) => ZapretServiceCommands.RemoveServicesAsync(runner, ct));
         if (result is not null)
-        {
-            ServiceOutputTextBox.Text =
-                $"=== Remove service ==={Environment.NewLine}{ZapretServiceCommands.FormatRemoveServiceOutput(result.Value)}";
-
-            if (!ZapretServiceCommands.IndicatesRemoveCompleted(result.Value))
-            {
-                var hasStatusOnly = ZapretServiceCommands.FormatCheckStatusOutput(result.Value)
-                    .Contains("RUNNING", StringComparison.OrdinalIgnoreCase);
-                System.Windows.MessageBox.Show(
-                    hasStatusOnly
-                        ? "The log shows Check status output, not remove (no sc delete / taskkill). " +
-                          "Try Remove again, or run service.bat → option 2 manually as administrator."
-                        : "Remove did not finish (no sc delete in the log). " +
-                          "See the output panel and %LocalAppData%\\zapret-gui\\last-run.log.",
-                    "Remove service",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-            }
-        }
-
-        RefreshInstalledStrategy();
+            SetZapretOutput(Loc.RemoveServices, result.Value, ServiceMenuOperation.Remove);
     }
 
     private async Task CheckServiceStatusAsync()
@@ -452,34 +624,32 @@ public partial class MainWindow : Window
         var result = await RunZapretBatAsync(
             (runner, ct) => ZapretServiceCommands.CheckStatusAsync(runner, ct));
         if (result is not null)
-        {
-            ServiceOutputTextBox.Text =
-                $"=== Check status ==={Environment.NewLine}{ZapretServiceCommands.FormatCheckStatusOutput(result.Value)}";
-
-            var statusText = $"{result.Value.StdOut}\n{result.Value.StdErr}";
-            var hasStatus =
-                statusText.Contains("service is ", StringComparison.OrdinalIgnoreCase) &&
-                (statusText.Contains("WinDivert", StringComparison.OrdinalIgnoreCase) ||
-                 statusText.Contains("Bypass (winws.exe)", StringComparison.OrdinalIgnoreCase));
-            if (!hasStatus)
-            {
-                System.Windows.MessageBox.Show(
-                    "Check status did not finish (expected service / WinDivert / winws lines in the log). " +
-                    "See %LocalAppData%\\zapret-gui\\last-run.log.",
-                    "Check status",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-            }
-        }
-
-        RefreshInstalledStrategy();
+            SetZapretOutput(Loc.CheckStatus, result.Value, ServiceMenuOperation.CheckStatus);
     }
 
     private void RefreshZapretSections()
     {
+        RefreshServiceRunningBanner();
         RefreshServiceSection();
         RefreshListsSection();
         RefreshDiagnosticsSection();
+    }
+
+    private void RefreshServiceRunningBanner()
+    {
+        var path = GetZapretPath();
+        if (string.IsNullOrWhiteSpace(path))
+            path = ZapretFolder.DefaultBesideExecutable;
+
+        if (IsZapretFolder(path) &&
+            ZapretServiceCommands.TryGetRunningServiceMenuIndex(path, out var menuIndex))
+        {
+            ServiceRunningBannerText.Text = Loc.ServiceRunning(menuIndex);
+            ServiceRunningBanner.Visibility = Visibility.Visible;
+            return;
+        }
+
+        ServiceRunningBanner.Visibility = Visibility.Collapsed;
     }
 
     private void RefreshServiceSection()
@@ -489,22 +659,36 @@ public partial class MainWindow : Window
 
         InstallServiceButton.IsEnabled = isValid && !_isBusy;
         RemoveServiceButton.IsEnabled = isValid && !_isBusy;
+        TurnOffButton.IsEnabled = isValid && !_isBusy;
         CheckStatusButton.IsEnabled = isValid && !_isBusy;
         StrategyComboBox.IsEnabled = isValid && !_isBusy;
 
         if (!isValid)
         {
             StrategyComboBox.ItemsSource = null;
-            RefreshInstalledStrategy();
+            InstalledStrategyTextBlock.Text = Loc.InstalledStrategyInvalidFolder;
             return;
         }
 
         var runner = new ZapretBatRunner(path);
         StrategyComboBox.ItemsSource = runner.InstallableBatFiles;
-        var defaultBat = runner.InstallableBatFiles.FirstOrDefault(
-            f => string.Equals(f, "general.bat", StringComparison.OrdinalIgnoreCase));
-        StrategyComboBox.SelectedItem = defaultBat ?? runner.InstallableBatFiles.FirstOrDefault();
-        RefreshInstalledStrategy();
+
+        var strategy = ZapretServiceCommands.ReadInstalledStrategy();
+        InstalledStrategyTextBlock.Text =
+            Loc.InstalledStrategy(strategy is null ? Loc.None : strategy);
+
+        var selectedBat = strategy is null
+            ? null
+            : runner.InstallableBatFiles.FirstOrDefault(
+                f => string.Equals(f, strategy, StringComparison.OrdinalIgnoreCase));
+        if (selectedBat is null)
+        {
+            selectedBat = runner.InstallableBatFiles.FirstOrDefault(
+                f => string.Equals(f, "general.bat", StringComparison.OrdinalIgnoreCase))
+                ?? runner.InstallableBatFiles.FirstOrDefault();
+        }
+
+        StrategyComboBox.SelectedItem = selectedBat;
     }
 
     private void RefreshListsSection()
@@ -517,22 +701,17 @@ public partial class MainWindow : Window
 
         if (!isValid)
         {
-            IpSetTimestampTextBlock.Text = "lists\\ipset-all.txt: (invalid zapret folder)";
-            HostsTimestampTextBlock.Text = "System hosts file: (invalid zapret folder)";
+            IpSetTimestampTextBlock.Text = Loc.IpSetInvalidFolder;
+            HostsTimestampTextBlock.Text = Loc.HostsInvalidFolder;
             return;
         }
 
-        RefreshListTimestamps(path);
-    }
-
-    private void RefreshListTimestamps(string zapretPath)
-    {
-        var ipsetPath = ZapretServiceCommands.GetIpSetListPath(zapretPath);
+        var ipsetPath = ZapretServiceCommands.GetIpSetListPath(path);
         var hostsPath = ZapretServiceCommands.GetSystemHostsPath();
         IpSetTimestampTextBlock.Text =
-            $"lists\\ipset-all.txt: {ZapretServiceCommands.FormatFileTimestamp(ipsetPath)}";
+            Loc.IpSetTimestamp(ZapretServiceCommands.FormatFileTimestamp(ipsetPath));
         HostsTimestampTextBlock.Text =
-            $"System hosts file: {ZapretServiceCommands.FormatFileTimestamp(hostsPath)}";
+            Loc.HostsTimestamp(ZapretServiceCommands.FormatFileTimestamp(hostsPath));
     }
 
     private async Task UpdateIpSetListAsync()
@@ -542,31 +721,18 @@ public partial class MainWindow : Window
         if (result is null)
             return;
 
-        SetZapretOutput("Update IPSet list", result.Value);
-        RefreshListTimestamps(GetZapretPath());
+        SetZapretOutput(Loc.UpdateIpSetList, result.Value, ServiceMenuOperation.UpdateIpSet);
+        RefreshListsSection();
 
-        if (!ZapretServiceCommands.IndicatesUpdateIpSetCompleted(result.Value))
-        {
-            System.Windows.MessageBox.Show(
-                "IPSet update did not finish (expected \"Updating ipset\" and \"Finished\" in the log). " +
-                "See the output panel and %LocalAppData%\\zapret-gui\\last-run.log.",
-                "Update IPSet list",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-        }
-        else if (IsZapretListActionSuccess(result.Value))
-        {
-            await ShowBannerBrieflyAsync("IPSet list updated");
-        }
+        if (!ZapretServiceCommands.IndicatesFailure(result.Value))
+            await ShowBannerBrieflyAsync(Loc.IpSetListUpdated);
     }
 
     private async Task UpdateHostsFileAsync()
     {
         var confirm = System.Windows.MessageBox.Show(
-            "This runs service.bat option 8, which may open Notepad with zapret hosts entries " +
-            "for you to merge into the system hosts file:\n\n" +
-            $"{ZapretServiceCommands.GetSystemHostsPath()}\n\nContinue?",
-            "Update hosts file",
+            Loc.UpdateHostsConfirm(ZapretServiceCommands.GetSystemHostsPath()),
+            Loc.UpdateHostsFile,
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
         if (confirm != MessageBoxResult.Yes)
@@ -577,33 +743,9 @@ public partial class MainWindow : Window
         if (result is null)
             return;
 
-        SetZapretOutput("Update hosts file", result.Value);
-        RefreshListTimestamps(GetZapretPath());
-
-        if (!ZapretServiceCommands.IndicatesUpdateHostsCompleted(result.Value))
-        {
-            System.Windows.MessageBox.Show(
-                "Hosts update check did not finish (expected \"Checking hosts file\" in the log). " +
-                "See the output panel and %LocalAppData%\\zapret-gui\\last-run.log.",
-                "Update hosts file",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-        }
-        else if (IsZapretListActionSuccess(result.Value))
-        {
-            await ShowBannerBrieflyAsync("Hosts file check completed");
-        }
-
-        if (!ZapretServiceCommands.IndicatesFailure(result.Value))
-        {
-            ServiceOutputTextBox.Text +=
-                $"{Environment.NewLine}{Environment.NewLine}" +
-                "Note: service.bat may open Notepad for manual merge into the system hosts file.";
-        }
+        SetZapretOutput(Loc.UpdateHostsFile, result.Value, ServiceMenuOperation.UpdateHosts);
+        RefreshListsSection();
     }
-
-    private static bool IsZapretListActionSuccess(ZapretBatResult result) =>
-        ZapretServiceCommands.IsMenuActionSuccess(result);
 
     private void RefreshDiagnosticsSection()
     {
@@ -617,20 +759,8 @@ public partial class MainWindow : Window
         var result = await RunZapretBatAsync(
             (runner, ct) => ZapretServiceCommands.RunDiagnosticsAsync(runner, ct),
             runningButton: RunDiagnosticsButton);
-        if (result is null)
-            return;
-
-        SetZapretOutput("Run diagnostics", result.Value);
-
-        if (!ZapretServiceCommands.IndicatesDiagnosticsCompleted(result.Value))
-        {
-            System.Windows.MessageBox.Show(
-                "Diagnostics did not finish (expected BFE check and Discord cache prompt in the log). " +
-                "See the output panel and %LocalAppData%\\zapret-gui\\last-run.log.",
-                "Run diagnostics",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-        }
+        if (result is not null)
+            SetZapretOutput(Loc.RunDiagnostics, result.Value, ServiceMenuOperation.Diagnostics);
     }
 
     private async Task RunConnectivityTestsAsync()
@@ -639,10 +769,8 @@ public partial class MainWindow : Window
         if (!ZapretServiceCommands.ConnectivityTestsScriptExists(path))
         {
             System.Windows.MessageBox.Show(
-                $"Connectivity test script was not found:\n\n" +
-                $"{ZapretServiceCommands.GetConnectivityTestsScriptPath(path)}\n\n" +
-                "Install or update zapret to include utils\\test zapret.ps1.",
-                "Run connectivity tests",
+                Loc.ConnectivityScriptNotFound(ZapretServiceCommands.GetConnectivityTestsScriptPath(path)),
+                Loc.RunConnectivityTests,
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
@@ -650,53 +778,41 @@ public partial class MainWindow : Window
 
         var result = await RunZapretBatAsync(
             (runner, ct) => ZapretServiceCommands.RunTestsAsync(runner, ct),
-            runningButton: RunConnectivityTestsButton,
-            treatNonZeroExitAsFailure: false,
-            indicatesFailure: ZapretServiceCommands.IndicatesFailureForRunTests);
+            runningButton: RunConnectivityTestsButton);
         if (result is null)
             return;
 
-        SetZapretOutput("Run connectivity tests", result.Value);
-        if (result.Value.ExitCode == -1)
-            return;
-
-        if (!ZapretServiceCommands.IndicatesTestsCompleted(result.Value))
+        SetZapretOutput(Loc.RunConnectivityTests, result.Value, ServiceMenuOperation.Tests);
+        if (result.Value.ExitCode != -1)
         {
-            System.Windows.MessageBox.Show(
-                "Tests menu did not run (expected \"Starting configuration tests\" in the log). " +
-                "See %LocalAppData%\\zapret-gui\\last-run.log.",
-                "Run connectivity tests",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            ServiceOutputTextBox.Text +=
+                $"{Environment.NewLine}{Environment.NewLine}" +
+                Loc.TestsRunSeparateWindow;
         }
-
-        ServiceOutputTextBox.Text +=
-            $"{Environment.NewLine}{Environment.NewLine}" +
-            "Note: service.bat launches tests in a separate PowerShell window. " +
-            "Watch that window for live test output.";
     }
 
-    private void RefreshInstalledStrategy() =>
-        InstalledStrategyTextBlock.Text = BuildInstalledStrategyText();
-
-    private string BuildInstalledStrategyText()
-    {
-        if (!IsZapretFolder(GetZapretPath()))
-            return "Installed strategy: (invalid zapret folder)";
-
-        var strategy = ZapretServiceCommands.ReadInstalledStrategy();
-        var strategyText = strategy is null ? "(none)" : strategy;
-        return $"Installed strategy: {strategyText}";
-    }
-
-    private void SetZapretOutput(string action, ZapretBatResult result)
+    private void SetZapretOutput(string action, ZapretBatResult result, ServiceMenuOperation operation)
     {
         ServiceOutputTextBox.Text =
-            $"=== {action} ==={Environment.NewLine}{ZapretServiceCommands.FormatServiceMenuOutput(result)}";
+            $"{Loc.OutputHeader(action)}{Environment.NewLine}" +
+            $"{ZapretServiceCommands.FormatOutput(result, operation)}{Environment.NewLine}{Environment.NewLine}" +
+            Loc.LogLine(ZapretBatRunner.LogFilePath);
     }
 
     private string GetZapretPath() =>
         ZapretPathTextBox.Text.Trim();
+
+    private string ResolveDoEverythingZapretPath()
+    {
+        var path = GetZapretPath();
+        if (!string.IsNullOrWhiteSpace(path))
+            return path;
+
+        path = ZapretFolder.EnsureBesideExecutable();
+        ZapretPathTextBox.Text = path;
+        SaveZapretPath();
+        return path;
+    }
 
     private sealed class Win32Window(nint handle) : WinForms.IWin32Window
     {

@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:zapret_gui"
         mc:Ignorable="d"
         Title="zapret-gui" Height="700" Width="520"
-        MinHeight="520" MinWidth="520"
+        MinHeight="560" MinWidth="520"
         Loaded="MainWindow_Loaded">
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -15,156 +15,220 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border x:Name="UpdateBanner"
+        <Border x:Name="ServiceRunningBanner"
                 Grid.Row="0"
                 Visibility="Collapsed"
-                Background="#FFF3CD"
-                BorderBrush="#FFE69C"
+                Background="#D1E7DD"
+                BorderBrush="#A3CFBB"
                 BorderThickness="1"
                 Padding="12,8"
-                Margin="0,0,0,12"
+                Margin="0,0,0,8"
                 CornerRadius="4">
-            <TextBlock x:Name="UpdateBannerText" TextWrapping="Wrap"/>
+            <TextBlock x:Name="ServiceRunningBannerText"
+                       TextWrapping="Wrap"
+                       Foreground="#0F5132"
+                       HorizontalAlignment="Center"
+                       FontWeight="SemiBold"/>
         </Border>
 
-        <Label Grid.Row="1" Content="Path to zapret:" Padding="0,0,0,4"/>
-
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-
-            <TextBox x:Name="ZapretPathTextBox"
-                     Grid.Column="0"
-                     Margin="0,0,8,0"
-                     VerticalContentAlignment="Center"
-                     LostFocus="ZapretPathTextBox_LostFocus"
-                     KeyDown="ZapretPathTextBox_KeyDown"/>
-
-            <Button x:Name="BrowseButton"
-                    Grid.Column="1"
-                    Content="Browse..."
-                    Padding="12,4"
-                    Click="BrowseButton_Click"/>
-        </Grid>
-
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
-            <Button x:Name="CheckForUpdateButton"
-                    Content="Check for update"
-                    Padding="12,4"
-                    Margin="0,0,8,0"
-                    Click="CheckForUpdateButton_Click"/>
-            <Button x:Name="UpdateButton"
-                    Content="Update"
-                    Padding="12,4"
-                    Click="UpdateButton_Click"/>
-        </StackPanel>
-
-        <TabControl Grid.Row="4" Margin="0,16,0,0">
-            <TabItem Header="Service">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                    <StackPanel>
-                        <TextBlock x:Name="InstalledStrategyTextBlock"
-                                   Text="Installed strategy: (unknown)"
-                                   TextWrapping="Wrap"
-                                   Margin="0,0,0,8"/>
-
-                        <Label Content="Strategy for install:" Padding="0,0,0,4"/>
-                        <ComboBox x:Name="StrategyComboBox"
-                                  Margin="0,0,0,12"
-                                  IsEditable="False"/>
-
-                        <StackPanel Orientation="Horizontal">
-                            <Button x:Name="InstallServiceButton"
-                                    Content="Install service"
-                                    Padding="12,4"
-                                    Margin="0,0,8,0"
-                                    Click="InstallServiceButton_Click"/>
-                            <Button x:Name="RemoveServiceButton"
-                                    Content="Remove service"
-                                    Padding="12,4"
-                                    Margin="0,0,8,0"
-                                    Click="RemoveServiceButton_Click"/>
-                            <Button x:Name="CheckStatusButton"
-                                    Content="Check status"
-                                    Padding="12,4"
-                                    Click="CheckStatusButton_Click"/>
-                        </StackPanel>
+        <ComboBox x:Name="LanguageComboBox"
+                  Grid.Row="1"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Top"
+                  Width="96"
+                  Margin="0,0,0,8"
+                  SelectionChanged="LanguageComboBox_SelectionChanged">
+            <ComboBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="{Binding FlagIcon}"
+                               Width="22"
+                               Height="15"
+                               Margin="0,0,6,0"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <TextBlock Text="{Binding Code}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
-                </ScrollViewer>
-            </TabItem>
+                </DataTemplate>
+            </ComboBox.ItemTemplate>
+        </ComboBox>
 
-            <TabItem Header="Lists">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                    <StackPanel>
-                        <TextBlock x:Name="IpSetTimestampTextBlock"
-                                   Text="lists\ipset-all.txt: (unknown)"
-                                   TextWrapping="Wrap"
-                                   Margin="0,0,0,4"/>
-                        <TextBlock x:Name="HostsTimestampTextBlock"
-                                   Text="System hosts file: (unknown)"
-                                   TextWrapping="Wrap"
-                                   Margin="0,0,0,12"/>
+        <Button x:Name="DoEverythingButton"
+                Grid.Row="2"
+                Padding="16,10"
+                Margin="0,0,0,8"
+                HorizontalAlignment="Stretch"
+                Click="DoEverythingButton_Click"/>
 
-                        <StackPanel Orientation="Horizontal">
-                            <Button x:Name="UpdateIpSetListButton"
-                                    Content="Update IPSet list"
-                                    Padding="12,4"
-                                    Margin="0,0,8,0"
-                                    Click="UpdateIpSetListButton_Click"/>
-                            <Button x:Name="UpdateHostsFileButton"
-                                    Content="Update hosts file"
-                                    Padding="12,4"
-                                    Click="UpdateHostsFileButton_Click"/>
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
+        <Button x:Name="TurnOffButton"
+                Grid.Row="3"
+                Padding="16,10"
+                Margin="0,0,0,12"
+                HorizontalAlignment="Stretch"
+                Click="TurnOffButton_Click"/>
 
-            <TabItem Header="Diagnostics">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                    <StackPanel>
-                        <TextBlock Text="Connectivity tests open a separate PowerShell window (utils\test zapret.ps1)."
-                                   TextWrapping="Wrap"
-                                   Margin="0,0,0,12"/>
+        <ScrollViewer Grid.Row="4"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <Expander x:Name="AdvancedExpander"
+                          IsExpanded="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  MinHeight="240">
+                        <Grid MinWidth="456">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
 
-                        <StackPanel Orientation="Horizontal">
-                            <Button x:Name="RunDiagnosticsButton"
-                                    Content="Run diagnostics"
-                                    Padding="12,4"
-                                    Margin="0,0,8,0"
-                                    Click="RunDiagnosticsButton_Click"/>
-                            <Button x:Name="RunConnectivityTestsButton"
-                                    Content="Run connectivity tests"
-                                    Padding="12,4"
-                                    Margin="0,0,8,0"
-                                    Click="RunConnectivityTestsButton_Click"/>
-                            <Button x:Name="CancelZapretOperationButton"
-                                    Content="Cancel"
-                                    Padding="12,4"
+                            <Border x:Name="UpdateBanner"
+                                    Grid.Row="0"
                                     Visibility="Collapsed"
-                                    Click="CancelZapretOperationButton_Click"/>
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-        </TabControl>
+                                    Background="#FFF3CD"
+                                    BorderBrush="#FFE69C"
+                                    BorderThickness="1"
+                                    Padding="12,8"
+                                    Margin="0,0,0,12"
+                                    CornerRadius="4">
+                                <TextBlock x:Name="UpdateBannerText" TextWrapping="Wrap"/>
+                            </Border>
 
-        <Label Grid.Row="5" Content="Output" Padding="0,12,0,4"/>
+                            <Label x:Name="PathToZapretLabel"
+                                   Grid.Row="1"
+                                   Padding="0,0,0,4"/>
 
-        <TextBox Grid.Row="6"
-                 x:Name="ServiceOutputTextBox"
-                 MinHeight="120"
-                 MaxHeight="200"
-                 IsReadOnly="True"
-                 TextWrapping="Wrap"
-                 VerticalScrollBarVisibility="Auto"
-                 FontFamily="Consolas"
-                 Padding="8,6"/>
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <TextBox x:Name="ZapretPathTextBox"
+                                         Grid.Column="0"
+                                         Margin="0,0,8,0"
+                                         VerticalContentAlignment="Center"
+                                         LostFocus="ZapretPathTextBox_LostFocus"
+                                         KeyDown="ZapretPathTextBox_KeyDown"/>
+
+                                <Button x:Name="BrowseButton"
+                                        Grid.Column="1"
+                                        Padding="12,4"
+                                        Click="BrowseButton_Click"/>
+                            </Grid>
+
+                            <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
+                                <Button x:Name="CheckForUpdateButton"
+                                        Padding="12,4"
+                                        Margin="0,0,8,0"
+                                        Click="CheckForUpdateButton_Click"/>
+                                <Button x:Name="UpdateButton"
+                                        Padding="12,4"
+                                        Click="UpdateButton_Click"/>
+                            </StackPanel>
+
+                            <TabControl Grid.Row="4"
+                                        Margin="0,16,0,0"
+                                        MinHeight="160">
+                                <TabItem x:Name="ServiceTab">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                                        <StackPanel>
+                                            <TextBlock x:Name="InstalledStrategyTextBlock"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,8"/>
+
+                                            <Label x:Name="StrategyForInstallLabel"
+                                                   Padding="0,0,0,4"/>
+                                            <ComboBox x:Name="StrategyComboBox"
+                                                      Margin="0,0,0,12"
+                                                      IsEditable="False"/>
+
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button x:Name="InstallServiceButton"
+                                                        Padding="12,4"
+                                                        Margin="0,0,8,0"
+                                                        Click="InstallServiceButton_Click"/>
+                                                <Button x:Name="RemoveServiceButton"
+                                                        Padding="12,4"
+                                                        Margin="0,0,8,0"
+                                                        Click="RemoveServiceButton_Click"/>
+                                                <Button x:Name="CheckStatusButton"
+                                                        Padding="12,4"
+                                                        Click="CheckStatusButton_Click"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
+
+                                <TabItem x:Name="ListsTab">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                                        <StackPanel>
+                                            <TextBlock x:Name="IpSetTimestampTextBlock"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,4"/>
+                                            <TextBlock x:Name="HostsTimestampTextBlock"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,12"/>
+
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button x:Name="UpdateIpSetListButton"
+                                                        Padding="12,4"
+                                                        Margin="0,0,8,0"
+                                                        Click="UpdateIpSetListButton_Click"/>
+                                                <Button x:Name="UpdateHostsFileButton"
+                                                        Padding="12,4"
+                                                        Click="UpdateHostsFileButton_Click"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
+
+                                <TabItem x:Name="DiagnosticsTab">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
+                                        <StackPanel>
+                                            <TextBlock x:Name="ConnectivityTestsHintTextBlock"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,12"/>
+
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button x:Name="RunDiagnosticsButton"
+                                                        Padding="12,4"
+                                                        Margin="0,0,8,0"
+                                                        Click="RunDiagnosticsButton_Click"/>
+                                                <Button x:Name="RunConnectivityTestsButton"
+                                                        Padding="12,4"
+                                                        Margin="0,0,8,0"
+                                                        Click="RunConnectivityTestsButton_Click"/>
+                                                <Button x:Name="CancelZapretOperationButton"
+                                                        Padding="12,4"
+                                                        Visibility="Collapsed"
+                                                        Click="CancelZapretOperationButton_Click"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </TabItem>
+                            </TabControl>
+                        </Grid>
+                    </ScrollViewer>
+                </Expander>
+
+                <Label x:Name="OutputLabel"
+                       Padding="0,12,0,4"/>
+
+                <TextBox x:Name="ServiceOutputTextBox"
+                         MinHeight="120"
+                         MaxHeight="200"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"
+                         Padding="8,6"/>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Window>

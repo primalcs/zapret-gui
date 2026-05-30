@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -6,34 +7,26 @@ namespace zapret_gui;
 
 public enum ServiceMenuOperation
 {
-    Generic,
     Install,
-    CheckStatus,
     Remove,
+    CheckStatus,
     UpdateIpSet,
     UpdateHosts,
     Diagnostics,
     Tests,
 }
 
-/// <summary>
-/// Documented invocation contract for service.bat (v1.9.8c).
-/// See docs/README.md → GUI invocation.
-/// </summary>
 public static class ZapretServiceCommands
 {
     private static readonly Regex DigitSortRegex = new(@"(\d+)", RegexOptions.Compiled);
+    private static readonly Regex MenuOptionLineRegex = new(
+        @"^\s*\d+\.\s+(Install Service|Remove Services|Check Status|Game Filter|IPSet Filter|Auto-Update|Update IPSet|Update Hosts|Check for Updates|Run Diagnostics|Run Tests|Exit)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex InstallBatLineRegex = new(
+        @"^\d+\.\s+general.*\.bat\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // --- Non-interactive CLI arguments (handled before admin / menu; no UAC for these alone) ---
-
-    public const string ArgStatusZapret = "status_zapret";
-    public const string ArgCheckUpdates = "check_updates";
-    public const string ArgCheckUpdatesSoft = "soft";
-    public const string ArgLoadGameFilter = "load_game_filter";
-    public const string ArgLoadUserLists = "load_user_lists";
     public const string ArgAdmin = "admin";
-
-    // --- Interactive menu digits (require: service.bat admin + stdin) ---
 
     public const string MenuInstall = "1";
     public const string MenuRemove = "2";
@@ -42,46 +35,18 @@ public static class ZapretServiceCommands
     public const string MenuUpdateHosts = "8";
     public const string MenuDiagnostics = "10";
     public const string MenuRunTests = "11";
-    public const string MenuExit = "0";
 
-    /// <summary>Stdin for echo-pipe menu actions. Trailing empty line feeds service.bat "pause".</summary>
     public static readonly IReadOnlyList<string> StdinRemoveServices = [MenuRemove, ""];
-
     public static readonly IReadOnlyList<string> StdinCheckStatus = [MenuStatus, ""];
-
-    public static readonly IReadOnlyList<string> StdinUpdateIpSetList = [MenuUpdateIpSet, ""];
-
-    public static readonly IReadOnlyList<string> StdinUpdateHostsFile = [MenuUpdateHosts, ""];
-
-    /// <summary>Empty lines feed set /p defaults (N/Y) and extra pause when conflict prompt is skipped.</summary>
-    public static readonly IReadOnlyList<string> StdinRunDiagnostics = [MenuDiagnostics, "", "", ""];
-
-    public static readonly IReadOnlyList<string> StdinRunTests = [MenuRunTests, ""];
+    public static readonly IReadOnlyList<string> StdinUpdateIpSetList = [MenuUpdateIpSet];
+    public static readonly IReadOnlyList<string> StdinUpdateHostsFile = [MenuUpdateHosts];
+    /// <summary>N = no conflicting-software removal; Y = clear Discord cache (service.bat set /p defaults).</summary>
+    public static readonly IReadOnlyList<string> StdinRunDiagnostics = [MenuDiagnostics, "N", "Y", ""];
+    public static readonly IReadOnlyList<string> StdinRunTests = [MenuRunTests];
 
     public static IReadOnlyList<string> StdinInstallService(int installMenuIndex) =>
-        [MenuInstall, installMenuIndex.ToString(), ""];
+        [MenuInstall, installMenuIndex.ToString()];
 
-    /// <summary>Wait until stdout contains this text before sending the matching stdin line.</summary>
-    public static IReadOnlyList<string> GetStdinPromptMarkers(IReadOnlyList<string> stdinLines)
-    {
-        if (stdinLines.Count == 0)
-            return [];
-
-        if (stdinLines[0] == MenuInstall)
-        {
-            return stdinLines.Count switch
-            {
-                1 => ["Select option (0-11)"],
-                _ => ["Select option (0-11)", "Input file index (number)"],
-            };
-        }
-
-        return ["Select option (0-11)"];
-    }
-
-    /// <summary>
-    /// Same ordering as service.bat install menu (all *.bat except service*).
-    /// </summary>
     public static IReadOnlyList<string> GetInstallableBatFiles(string zapretFolder) =>
         Directory.Exists(zapretFolder)
             ? Directory
@@ -99,8 +64,25 @@ public static class ZapretServiceCommands
     public static int? GetInstallMenuIndex(string zapretFolder, string batFileName)
     {
         var files = GetInstallableBatFiles(zapretFolder);
-        var index = files.ToList().FindIndex(f => string.Equals(f, batFileName, StringComparison.OrdinalIgnoreCase));
+        var normalizedName = NormalizeStrategyBatFileName(batFileName);
+        var index = files.ToList().FindIndex(f =>
+            string.Equals(f, normalizedName, StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+        {
+            var stem = Path.GetFileNameWithoutExtension(normalizedName);
+            index = files.ToList().FindIndex(f =>
+                string.Equals(Path.GetFileNameWithoutExtension(f), stem, StringComparison.OrdinalIgnoreCase));
+        }
+
         return index >= 0 ? index + 1 : null;
+    }
+
+    private static string NormalizeStrategyBatFileName(string strategy)
+    {
+        strategy = strategy.Trim();
+        return strategy.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
+            ? strategy
+            : strategy + ".bat";
     }
 
     public static string? ReadInstalledStrategy()
@@ -118,6 +100,55 @@ public static class ZapretServiceCommands
         }
     }
 
+    public static bool TryGetRunningServiceMenuIndex(string zapretFolder, out int menuIndex)
+    {
+        menuIndex = 0;
+        if (string.IsNullOrWhiteSpace(zapretFolder) || !Directory.Exists(zapretFolder))
+            return false;
+
+        if (!IsZapretWindowsServiceRunning())
+            return false;
+
+        var strategy = ReadInstalledStrategy();
+        if (strategy is null)
+            return false;
+
+        var index = GetInstallMenuIndex(zapretFolder, strategy);
+        if (index is null)
+            return false;
+
+        menuIndex = index.Value;
+        return true;
+    }
+
+    private static bool IsZapretWindowsServiceRunning()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "sc.exe",
+                Arguments = "query zapret",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            if (process is null)
+                return false;
+
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(5000);
+            return process.ExitCode == 0 &&
+                   output.Contains("STATE", StringComparison.OrdinalIgnoreCase) &&
+                   output.Contains("RUNNING", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static string GetIpSetListPath(string zapretFolder) =>
         Path.Combine(zapretFolder, "lists", "ipset-all.txt");
 
@@ -131,50 +162,8 @@ public static class ZapretServiceCommands
         File.Exists(GetConnectivityTestsScriptPath(zapretFolder));
 
     public static string FormatFileTimestamp(string path) =>
-        File.Exists(path) ? File.GetLastWriteTime(path).ToString("g") : "(missing)";
+        File.Exists(path) ? File.GetLastWriteTime(path).ToString("g") : Loc.Missing;
 
-    // --- Non-interactive CLI (no admin menu) ---
-
-    public static Task<ZapretBatResult> StatusZapretAsync(
-        ZapretBatRunner runner,
-        CancellationToken cancellationToken = default) =>
-        runner.RunProcessAsync(
-            runner.ServiceBatPath,
-            ArgStatusZapret,
-            requireAdmin: false,
-            cancellationToken: cancellationToken);
-
-    public static Task<ZapretBatResult> CheckUpdatesAsync(
-        ZapretBatRunner runner,
-        bool soft = true,
-        CancellationToken cancellationToken = default) =>
-        runner.RunProcessAsync(
-            runner.ServiceBatPath,
-            soft ? $"{ArgCheckUpdates} {ArgCheckUpdatesSoft}" : ArgCheckUpdates,
-            requireAdmin: false,
-            cancellationToken: cancellationToken);
-
-    public static Task<ZapretBatResult> LoadGameFilterAsync(
-        ZapretBatRunner runner,
-        CancellationToken cancellationToken = default) =>
-        runner.RunProcessAsync(
-            runner.ServiceBatPath,
-            ArgLoadGameFilter,
-            requireAdmin: false,
-            cancellationToken: cancellationToken);
-
-    public static Task<ZapretBatResult> LoadUserListsAsync(
-        ZapretBatRunner runner,
-        CancellationToken cancellationToken = default) =>
-        runner.RunProcessAsync(
-            runner.ServiceBatPath,
-            ArgLoadUserLists,
-            requireAdmin: false,
-            cancellationToken: cancellationToken);
-
-    // --- Menu actions (elevated service.bat admin + stdin) ---
-
-    /// <summary>Menu 1 — pick strategy by install-menu index (see <see cref="GetInstallMenuIndex"/>).</summary>
     public static Task<ZapretBatResult> InstallServiceAsync(
         ZapretBatRunner runner,
         string strategyBatFileName,
@@ -182,279 +171,341 @@ public static class ZapretServiceCommands
     {
         var menuIndex = GetInstallMenuIndex(runner.ZapretFolder, strategyBatFileName)
             ?? throw new ArgumentException(
-                $"\"{strategyBatFileName}\" is not in the service.bat install file list.",
+                Loc.BatNotInInstallList(strategyBatFileName),
                 nameof(strategyBatFileName));
 
-        return RunServiceMenuAsync(
-            runner,
-            StdinInstallService(menuIndex),
-            ServiceMenuOperation.Install,
-            operationTimeout: TimeSpan.FromSeconds(90),
-            cancellationToken);
+        return InstallServiceByMenuIndexAsync(runner, menuIndex, cancellationToken);
     }
 
-    /// <summary>Menu 2 — remove zapret / WinDivert services and kill winws.exe.</summary>
+    public static Task<ZapretBatResult> InstallServiceByMenuIndexAsync(
+        ZapretBatRunner runner,
+        int installMenuIndex,
+        CancellationToken cancellationToken = default) =>
+        runner.RunServiceMenuAsync(
+            StdinInstallService(installMenuIndex),
+            ServiceMenuOperation.Install,
+            cancellationToken);
+
+    public static bool IsServiceRunningSuccessfully(ZapretBatResult result)
+    {
+        var text = $"{result.StdOut}\n{result.StdErr}";
+        if (!HasStatusReport(text))
+            return false;
+
+        var zapretRunning =
+            text.Contains("service is RUNNING", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("is ALREADY RUNNING", StringComparison.OrdinalIgnoreCase);
+        if (!zapretRunning)
+            return false;
+
+        if (text.Contains("Bypass (winws.exe) is NOT RUNNING", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("winws.exe is NOT RUNNING", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return text.Contains("Bypass (winws.exe)", StringComparison.OrdinalIgnoreCase) ||
+               (text.Contains("winws.exe", StringComparison.OrdinalIgnoreCase) &&
+                text.Contains("RUNNING", StringComparison.OrdinalIgnoreCase));
+    }
+
     public static Task<ZapretBatResult> RemoveServicesAsync(
         ZapretBatRunner runner,
         CancellationToken cancellationToken = default) =>
-        RunServiceMenuAsync(
-            runner,
-            StdinRemoveServices,
-            ServiceMenuOperation.Remove,
-            operationTimeout: TimeSpan.FromSeconds(45),
-            cancellationToken);
+        runner.RunServiceMenuAsync(StdinRemoveServices, ServiceMenuOperation.Remove, cancellationToken);
 
-    /// <summary>Menu 3 — service, WinDivert, winws.exe status.</summary>
     public static Task<ZapretBatResult> CheckStatusAsync(
         ZapretBatRunner runner,
         CancellationToken cancellationToken = default) =>
-        RunServiceMenuAsync(
-            runner,
-            StdinCheckStatus,
-            ServiceMenuOperation.CheckStatus,
-            operationTimeout: TimeSpan.FromSeconds(45),
-            cancellationToken);
+        runner.RunServiceMenuAsync(StdinCheckStatus, ServiceMenuOperation.CheckStatus, cancellationToken);
 
-    /// <summary>Menu 7 — download lists\ipset-all.txt from GitHub.</summary>
     public static Task<ZapretBatResult> UpdateIpSetListAsync(
         ZapretBatRunner runner,
         CancellationToken cancellationToken = default) =>
-        RunServiceMenuAsync(
-            runner,
-            StdinUpdateIpSetList,
-            ServiceMenuOperation.UpdateIpSet,
-            operationTimeout: TimeSpan.FromSeconds(45),
-            cancellationToken);
+        runner.RunServiceMenuAsync(StdinUpdateIpSetList, ServiceMenuOperation.UpdateIpSet, cancellationToken);
 
-    /// <summary>Menu 8 — compare/merge zapret hosts into System32\drivers\etc\hosts (may open Notepad).</summary>
     public static Task<ZapretBatResult> UpdateHostsFileAsync(
         ZapretBatRunner runner,
         CancellationToken cancellationToken = default) =>
-        RunServiceMenuAsync(
-            runner,
-            StdinUpdateHostsFile,
-            ServiceMenuOperation.UpdateHosts,
-            operationTimeout: TimeSpan.FromSeconds(45),
-            cancellationToken);
+        runner.RunServiceMenuAsync(StdinUpdateHostsFile, ServiceMenuOperation.UpdateHosts, cancellationToken);
 
-    /// <summary>Menu 10 — BFE, proxy, TCP timestamps, conflicting software checks.</summary>
     public static Task<ZapretBatResult> RunDiagnosticsAsync(
         ZapretBatRunner runner,
         CancellationToken cancellationToken = default) =>
-        RunServiceMenuAsync(
-            runner,
-            StdinRunDiagnostics,
-            ServiceMenuOperation.Diagnostics,
-            operationTimeout: TimeSpan.FromSeconds(90),
-            cancellationToken);
+        runner.RunServiceMenuAsync(StdinRunDiagnostics, ServiceMenuOperation.Diagnostics, cancellationToken);
 
-    /// <summary>Menu 11 — launches utils\test zapret.ps1 in a separate PowerShell window.</summary>
     public static Task<ZapretBatResult> RunTestsAsync(
         ZapretBatRunner runner,
         CancellationToken cancellationToken = default) =>
-        RunServiceMenuAsync(
-            runner,
-            StdinRunTests,
-            ServiceMenuOperation.Tests,
-            operationTimeout: TimeSpan.FromSeconds(45),
-            cancellationToken);
+        runner.RunServiceMenuAsync(StdinRunTests, ServiceMenuOperation.Tests, cancellationToken);
 
-    private static Task<ZapretBatResult> RunServiceMenuAsync(
-        ZapretBatRunner runner,
-        IReadOnlyList<string> stdinLines,
-        ServiceMenuOperation operation,
-        TimeSpan operationTimeout,
-        CancellationToken cancellationToken) =>
-        runner.RunProcessAsync(
-            runner.ServiceBatPath,
-            ArgAdmin,
-            stdinLines,
-            requireAdmin: true,
-            operationTimeout: operationTimeout,
-            menuOperation: operation,
-            cancellationToken: cancellationToken);
+    public static bool ShouldSendStdin(string output, int lineIndex, IReadOnlyList<string> stdinLines)
+    {
+        if (lineIndex >= stdinLines.Count)
+            return false;
+
+        if (stdinLines[lineIndex].Length == 0)
+        {
+            return output.Contains("Press any key", StringComparison.OrdinalIgnoreCase) ||
+                   output.Contains("Для продолжения", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (stdinLines[0] == MenuDiagnostics)
+            return ShouldSendDiagnosticsStdin(output, lineIndex, stdinLines);
+
+        return lineIndex switch
+        {
+            0 => output.Contains("Select option (0-11)", StringComparison.OrdinalIgnoreCase),
+            1 when stdinLines[0] == MenuInstall =>
+                output.Contains("Input file index", StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
+    }
+
+    /// <summary>Conflict prompt is skipped when no conflicting software is found.</summary>
+    public static bool CanSkipStdinLine(string output, int lineIndex, IReadOnlyList<string> stdinLines)
+    {
+        if (stdinLines.Count == 0 || stdinLines[0] != MenuDiagnostics || lineIndex != 1)
+            return false;
+
+        return output.Contains("Do you want to clear the Discord cache", StringComparison.OrdinalIgnoreCase) &&
+               !HasConflictingSoftwarePrompt(output);
+    }
+
+    private static bool ShouldSendDiagnosticsStdin(string output, int lineIndex, IReadOnlyList<string> stdinLines) =>
+        lineIndex switch
+        {
+            0 => output.Contains("Select option (0-11)", StringComparison.OrdinalIgnoreCase),
+            1 => HasConflictingSoftwarePrompt(output),
+            2 => output.Contains("Do you want to clear the Discord cache", StringComparison.OrdinalIgnoreCase),
+            3 => output.Contains("Press any key", StringComparison.OrdinalIgnoreCase) ||
+                 output.Contains("Для продолжения", StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
+
+    private static bool HasConflictingSoftwarePrompt(string output) =>
+        output.Contains("conflicting software", StringComparison.OrdinalIgnoreCase) ||
+        (output.Contains("conflicting", StringComparison.OrdinalIgnoreCase) &&
+         output.Contains("(Y/N)", StringComparison.OrdinalIgnoreCase) &&
+         !output.Contains("Do you want to clear the Discord cache", StringComparison.OrdinalIgnoreCase));
+
+    public static bool IsActionComplete(string output, ServiceMenuOperation operation) =>
+        operation switch
+        {
+            ServiceMenuOperation.Install =>
+                output.Contains("Final args:", StringComparison.OrdinalIgnoreCase) ||
+                output.Contains("sc create", StringComparison.OrdinalIgnoreCase),
+            ServiceMenuOperation.Remove => HasRemoveOutput(output),
+            ServiceMenuOperation.CheckStatus => HasStatusReport(output),
+            ServiceMenuOperation.UpdateIpSet =>
+                output.Contains("Updating ipset", StringComparison.OrdinalIgnoreCase) &&
+                output.Contains("Finished", StringComparison.OrdinalIgnoreCase),
+            ServiceMenuOperation.UpdateHosts =>
+                output.Contains("Checking hosts file", StringComparison.OrdinalIgnoreCase) &&
+                (output.Contains("Hosts file is up to date", StringComparison.OrdinalIgnoreCase) ||
+                 output.Contains("Hosts file needs to be updated", StringComparison.OrdinalIgnoreCase) ||
+                 output.Contains("Failed to download hosts", StringComparison.OrdinalIgnoreCase)),
+            ServiceMenuOperation.Diagnostics => HasDiagnosticsFinished(output),
+            ServiceMenuOperation.Tests =>
+                output.Contains("Starting configuration tests", StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
 
     public static bool IndicatesFailure(ZapretBatResult result)
     {
         var text = $"{result.StdOut}\n{result.StdErr}";
         return text.Contains("Invalid choice", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("The choice is empty", StringComparison.OrdinalIgnoreCase) ||
-               text.Contains("Administrator permission was denied", StringComparison.OrdinalIgnoreCase) ||
                text.Contains("Failed to download hosts", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static bool IndicatesInstallCompleted(ZapretBatResult result)
+    public static int ResolveExitCode(
+        int processExitCode,
+        string stdout,
+        string stderr,
+        ServiceMenuOperation operation)
     {
-        var text = $"{result.StdOut}\n{result.StdErr}";
-        return text.Contains("Final args:", StringComparison.OrdinalIgnoreCase) ||
-               text.Contains("sc create", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public static bool IndicatesRemoveCompleted(ZapretBatResult result)
-    {
-        var text = $"{result.StdOut}\n{result.StdErr}";
-        return text.Contains("sc delete", StringComparison.OrdinalIgnoreCase) ||
-               (text.Contains("is not installed", StringComparison.OrdinalIgnoreCase) &&
-                text.Contains("zapret", StringComparison.OrdinalIgnoreCase)) ||
-               text.Contains("taskkill", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public static bool IndicatesUpdateIpSetCompleted(ZapretBatResult result)
-    {
-        var text = $"{result.StdOut}\n{result.StdErr}";
-        return text.Contains("Updating ipset", StringComparison.OrdinalIgnoreCase) &&
-               text.Contains("Finished", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public static bool IndicatesUpdateHostsCompleted(ZapretBatResult result)
-    {
-        var text = $"{result.StdOut}\n{result.StdErr}";
-        return text.Contains("Checking hosts file", StringComparison.OrdinalIgnoreCase) &&
-               (text.Contains("Hosts file is up to date", StringComparison.OrdinalIgnoreCase) ||
-                text.Contains("Hosts file needs to be updated", StringComparison.OrdinalIgnoreCase) ||
-                text.Contains("Failed to download hosts", StringComparison.OrdinalIgnoreCase));
-    }
-
-    public static bool IndicatesDiagnosticsCompleted(ZapretBatResult result)
-    {
-        var text = $"{result.StdOut}\n{result.StdErr}";
-        return text.Contains("Base Filtering Engine", StringComparison.OrdinalIgnoreCase) &&
-               text.Contains("Do you want to clear the Discord cache", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public static bool IndicatesTestsCompleted(ZapretBatResult result)
-    {
-        var text = $"{result.StdOut}\n{result.StdErr}";
-        return text.Contains("Starting configuration tests", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public static string FormatRemoveServiceOutput(ZapretBatResult result) =>
-        FormatServiceMenuOutput(result, IsRemoveOutputLine);
-
-    private static bool IsRemoveOutputLine(string trimmed) =>
-        trimmed.Contains("Started with admin", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("sc delete", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("net stop", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("taskkill", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("is not installed", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("WinDivert", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.StartsWith("Press any key", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Menu actions are stopped at pause; rely on output text, not exit code.</summary>
-    public static bool IndicatesFailureForMenuAction(ZapretBatResult result) =>
-        result.ExitCode == -1 || IndicatesFailure(result);
-
-    /// <summary>Option 11 launches an external window; exit code alone is not a reliable failure signal.</summary>
-    public static bool IndicatesFailureForRunTests(ZapretBatResult result) =>
-        IndicatesFailureForMenuAction(result);
-
-    public static bool IsMenuActionSuccess(ZapretBatResult result) =>
-        !IndicatesFailureForMenuAction(result);
-
-    /// <summary>Killing cmd at pause often yields exit code 1 despite success.</summary>
-    public static int NormalizeMenuExitCode(int exitCode, string stdout, string stderr)
-    {
-        if (exitCode is 0 or -1)
-            return exitCode;
-
-        if (IndicatesFailure(new ZapretBatResult(exitCode, stdout, stderr)))
-            return exitCode;
-
-        return string.IsNullOrWhiteSpace($"{stdout}{stderr}") ? exitCode : 0;
-    }
-
-    public static string FormatOutput(ZapretBatResult result)
-    {
-        var builder = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(result.StdOut))
-            builder.AppendLine(result.StdOut.TrimEnd());
-        if (!string.IsNullOrWhiteSpace(result.StdErr))
+        if (IsAbnormalTermination(processExitCode) &&
+            IsActionComplete($"{stdout}\n{stderr}", operation))
         {
-            if (builder.Length > 0)
-                builder.AppendLine();
-            builder.AppendLine(result.StdErr.TrimEnd());
+            return 0;
         }
 
-        if (builder.Length > 0)
-            return builder.ToString();
+        if (IndicatesFailure(new ZapretBatResult(processExitCode, stdout, stderr)))
+            return processExitCode == 0 ? 1 : processExitCode;
 
-        return "(no output — if UAC was denied, allow elevation and try again)";
+        if (!string.IsNullOrWhiteSpace(stdout) || !string.IsNullOrWhiteSpace(stderr))
+            return 0;
+
+        return processExitCode;
     }
 
-    /// <summary>Strip repeated main-menu redraws after pause; keep the useful action output.</summary>
-    public static string FormatServiceMenuOutput(ZapretBatResult result) =>
-        FormatServiceMenuOutput(result, _ => true);
-
-    public static string FormatCheckStatusOutput(ZapretBatResult result) =>
-        FormatServiceMenuOutput(result, IsCheckStatusLine);
-
-    private static string FormatServiceMenuOutput(
-        ZapretBatResult result,
-        Func<string, bool> includeLine)
+    public static string FormatOutput(ZapretBatResult result, ServiceMenuOperation operation)
     {
         var combined = $"{result.StdOut}\n{result.StdErr}";
-        if (string.IsNullOrWhiteSpace(combined))
-            return FormatOutput(result);
+        var cleaned = CleanOutput(combined, operation);
+        return string.IsNullOrWhiteSpace(cleaned)
+            ? Loc.NoOutput
+            : cleaned;
+    }
 
-        var lines = combined.Replace("\r\n", "\n").Split('\n');
+    public static string FormatErrorOutput(ZapretBatResult result) =>
+        CleanOutput($"{result.StdOut}\n{result.StdErr}", operation: null);
+
+    private static string CleanOutput(string combined, ServiceMenuOperation? operation)
+    {
+        if (string.IsNullOrWhiteSpace(combined))
+            return "";
+
         var kept = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var skippedInitialMenu = false;
 
-        foreach (var raw in lines)
+        foreach (var raw in combined.Replace("\r\n", "\n").Split('\n'))
         {
-            var line = raw.TrimEnd();
-            var trimmed = line.Trim();
-            if (trimmed.Length == 0)
+            var line = NormalizeLine(raw);
+            if (line.Length == 0)
                 continue;
 
-            if (IsMenuChromeLine(trimmed))
+            if (IsMenuChrome(line))
+                continue;
+
+            if (operation is not null && !IsValuableLine(line, operation.Value))
+                continue;
+
+            if (operation == ServiceMenuOperation.Install &&
+                line.Contains("Final args:", StringComparison.OrdinalIgnoreCase) &&
+                line.Length > 400)
             {
-                if (skippedInitialMenu && kept.Count > 0)
-                    break;
-
-                skippedInitialMenu = true;
-                continue;
+                line = line[..400] + "...";
             }
 
-            if (!includeLine(trimmed))
-                continue;
-
-            if (!seen.Add(trimmed))
+            if (!seen.Add(line))
                 continue;
 
             kept.Add(line);
         }
 
-        if (kept.Count == 0)
-            return FormatOutput(result);
-
         return string.Join(Environment.NewLine, kept);
     }
 
-    private static bool IsMenuChromeLine(string trimmed) =>
-        trimmed.Contains("ZAPRET SERVICE MANAGER", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.StartsWith(":: ", StringComparison.Ordinal) ||
-        trimmed.StartsWith("Select option", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.StartsWith("----", StringComparison.Ordinal) ||
-        IsEchoPipeLeakLine(trimmed);
+    private static string NormalizeLine(string raw)
+    {
+        var line = raw.Trim();
+        if (line.Length == 0)
+            return "";
 
-    /// <summary>Stray digits from echo-pipe stdin must not appear as action output.</summary>
-    private static bool IsEchoPipeLeakLine(string trimmed) =>
-        trimmed.Length > 0 &&
-        trimmed.Length <= 3 &&
-        trimmed.All(char.IsDigit);
+        var promptIndex = line.IndexOf("Input file index", StringComparison.OrdinalIgnoreCase);
+        if (promptIndex >= 0)
+        {
+            var after = line[(promptIndex + "Input file index".Length)..];
+            var colon = after.IndexOf(':');
+            if (colon >= 0)
+                line = after[(colon + 1)..].Trim();
+        }
 
-    private static bool IsCheckStatusLine(string trimmed) =>
-        trimmed.Contains("Started with admin", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("Strategy:", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("Service strategy installed", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("service is ", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("\"zapret\"", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("is ALREADY RUNNING", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("is STOP_PENDING", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("WinDivert", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("Bypass (winws.exe)", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Contains("winws.exe", StringComparison.OrdinalIgnoreCase) ||
-        trimmed.StartsWith("Press any key", StringComparison.OrdinalIgnoreCase);
+        return line;
+    }
+
+    private static bool IsMenuChrome(string line) =>
+        line.Contains("ZAPRET SERVICE MANAGER", StringComparison.OrdinalIgnoreCase) ||
+        line.StartsWith(":: ", StringComparison.Ordinal) ||
+        line.StartsWith("Select option", StringComparison.OrdinalIgnoreCase) ||
+        line.StartsWith("----", StringComparison.Ordinal) ||
+        line.Contains("Started with admin rights", StringComparison.OrdinalIgnoreCase) ||
+        MenuOptionLineRegex.IsMatch(line) ||
+        InstallBatLineRegex.IsMatch(line) ||
+        line.StartsWith("Press any key", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Для продолжения", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("нажмите любую клавишу", StringComparison.OrdinalIgnoreCase) ||
+        (line.Length <= 2 && line.All(char.IsDigit));
+
+    private static bool IsValuableLine(string line, ServiceMenuOperation operation) =>
+        operation switch
+        {
+            ServiceMenuOperation.Install => IsInstallLine(line),
+            ServiceMenuOperation.Remove => IsRemoveLine(line),
+            ServiceMenuOperation.CheckStatus => IsStatusLine(line),
+            ServiceMenuOperation.UpdateIpSet => IsIpSetLine(line),
+            ServiceMenuOperation.UpdateHosts => IsHostsLine(line),
+            ServiceMenuOperation.Diagnostics => IsDiagnosticsLine(line),
+            ServiceMenuOperation.Tests => IsTestsLine(line),
+            _ => true,
+        };
+
+    private static bool IsInstallLine(string line) =>
+        line.Contains("Final args:", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("sc create", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Pick one of the options", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Strategy:", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Service strategy installed", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRemoveLine(string line) =>
+        line.Contains("sc delete", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("net stop", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("taskkill", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("is not installed", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("WinDivert", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("zapret", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsStatusLine(string line) =>
+        line.Contains("service is ", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("\"zapret\"", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("WinDivert", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Bypass (winws.exe)", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("winws.exe", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Strategy:", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Service strategy installed", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsIpSetLine(string line) =>
+        line.Contains("Updating ipset", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Finished", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("ipset", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHostsLine(string line) =>
+        line.Contains("hosts", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Checking hosts file", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDiagnosticsLine(string line) =>
+        line.Contains("Base Filtering Engine", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("check passed", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("check failed", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Proxy check", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("TCP timestamps", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("conflicting", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Discord cache", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("secure DNS", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Adguard", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("Killer check", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("VPN check", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTestsLine(string line) =>
+        line.Contains("Starting configuration tests", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("test zapret", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasRemoveOutput(string output) =>
+        output.Contains("sc delete", StringComparison.OrdinalIgnoreCase) ||
+        (output.Contains("is not installed", StringComparison.OrdinalIgnoreCase) &&
+         output.Contains("zapret", StringComparison.OrdinalIgnoreCase)) ||
+        output.Contains("taskkill", StringComparison.OrdinalIgnoreCase) ||
+        (output.Contains("net stop", StringComparison.OrdinalIgnoreCase) &&
+         output.Contains("zapret", StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasStatusReport(string output) =>
+        (output.Contains("service is NOT running", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("service is RUNNING", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("is ALREADY RUNNING", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("\"zapret\"", StringComparison.OrdinalIgnoreCase)) &&
+        (output.Contains("WinDivert", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("Bypass (winws.exe)", StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasDiagnosticsFinished(string output) =>
+        output.Contains("Do you want to clear the Discord cache", StringComparison.OrdinalIgnoreCase) &&
+        (output.Contains("Press any key", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("Discord cache cleared", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("cleared Discord cache", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("Deleting Discord", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("cache has been cleared", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsAbnormalTermination(int exitCode) =>
+        exitCode == unchecked((int)0xC0000142);
 }

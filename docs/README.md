@@ -266,7 +266,7 @@ See `ZapretBatRunner.IsZapretFolder()`.
 
 All GUI actions run `service.bat` from the configured zapret folder via `ZapretBatRunner` (`cmd.exe /c`, working directory = zapret root). Implementation: `ZapretServiceCommands.cs`.
 
-Menu-driven actions use **`service.bat admin`** via an elevated **`( ( echo … ) | call service.bat admin )`** wrapper (echo-pipe stdin). The inner parentheses are required: without them, cmd only pipes the **last** `echo` to `call` (`echo 1 & echo 2 & echo. | call` feeds only `echo.`). A trailing **`echo.`** (empty line) answers `set /p` / `pause` where needed. The process is killed once action-specific output appears (before `goto menu` loops).
+Menu-driven actions run **`service.bat admin`** in-process (GUI requires administrator). Stdin menu choices are sent when the matching prompt appears in stdout; the process is stopped once action-specific output is detected (before the menu loops).
 
 ### Non-interactive CLI (no admin menu)
 
@@ -285,13 +285,13 @@ Called as `service.bat <argument>` **without** `admin`. Used by `general*.bat` p
 
 | Menu | Label | CLI shortcut | GUI stdin sequence | Notes |
 |------|-------|--------------|-------------------|--------|
-| 1 | Install Service | — | `1`, `{index}`, `` | `{index}` = 1-based number from numbered `*.bat` list (excludes `service*`). |
-| 2 | Remove Services | — | `2`, `` | Stops/deletes `zapret`, kills `winws.exe`, cleans WinDivert. |
-| 3 | Check Status | — | `3`, `` | Strategy registry value, `zapret` / WinDivert service, `winws.exe`. |
-| 7 | Update IPSet List | — | `7`, `` | Downloads `lists\ipset-all.txt` from GitHub. |
-| 8 | Update Hosts File | — | `8`, `` | Downloads hosts snippet; may open Notepad for **manual** merge into `%SystemRoot%\System32\drivers\etc\hosts`. |
-| 10 | Run Diagnostics | — | `10`, ``, ``, `` | Empty lines = set /p defaults: **N** (conflicts), **Y** (Discord cache); extra `echo.` if conflict prompt is skipped. |
-| 11 | Run Tests | — | `11`, `` | Starts `utils\test zapret.ps1` in a **separate** PowerShell window; little stdout in GUI. |
+| 1 | Install Service | — | `1`, `{index}` | `{index}` = 1-based number from numbered `*.bat` list (excludes `service*`). |
+| 2 | Remove Services | — | `2` | Stops/deletes `zapret`, kills `winws.exe`, cleans WinDivert. |
+| 3 | Check Status | — | `3` | Strategy registry value, `zapret` / WinDivert service, `winws.exe`. |
+| 7 | Update IPSet List | — | `7` | Downloads `lists\ipset-all.txt` from GitHub. |
+| 8 | Update Hosts File | — | `8` | Downloads hosts snippet; may open Notepad for **manual** merge into `%SystemRoot%\System32\drivers\etc\hosts`. |
+| 10 | Run Diagnostics | — | `10`, `N`, `Y`, `` | **N** = no conflicting-software removal; **Y** = clear Discord cache; last Enter = pause. |
+| 11 | Run Tests | — | `11` | Starts `utils\test zapret.ps1` in a **separate** PowerShell window; little stdout in GUI. |
 
 ### GUI button → bat call
 
