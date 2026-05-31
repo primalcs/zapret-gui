@@ -9,6 +9,9 @@ namespace zapret_gui;
 
 public static class FlagIcons
 {
+    public const double DisplayWidth = 36;
+    public const double DisplayHeight = 24;
+
     private static ImageSource? _us;
     private static ImageSource? _ru;
 
@@ -23,10 +26,11 @@ public static class FlagIcons
 
     private static ImageSource CreateFlagImage(Action<DrawingContext, double, double> draw)
     {
-        const double width = 22;
-        const double height = 15;
-        const int pixelWidth = 44;
-        const int pixelHeight = 30;
+        const int scale = 1;
+        var width = DisplayWidth;
+        var height = DisplayHeight;
+        var pixelWidth = (int)(width * scale);
+        var pixelHeight = (int)(height * scale);
 
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())

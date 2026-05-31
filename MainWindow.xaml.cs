@@ -404,13 +404,15 @@ public partial class MainWindow : Window
     {
         if (isSuccess)
         {
-            UpdateBanner.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xD1, 0xE7, 0xDD));
-            UpdateBanner.BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA3, 0xCF, 0xBB));
+            UpdateBanner.Background = (System.Windows.Media.Brush)FindResource("BannerSuccessBackground");
+            UpdateBanner.BorderBrush = (System.Windows.Media.Brush)FindResource("BannerSuccessBorder");
+            UpdateBannerText.Foreground = (System.Windows.Media.Brush)FindResource("BannerSuccessForeground");
         }
         else
         {
-            UpdateBanner.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0xF3, 0xCD));
-            UpdateBanner.BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0xE6, 0x9C));
+            UpdateBanner.Background = (System.Windows.Media.Brush)FindResource("BannerWarningBackground");
+            UpdateBanner.BorderBrush = (System.Windows.Media.Brush)FindResource("BannerWarningBorder");
+            UpdateBannerText.Foreground = (System.Windows.Media.Brush)FindResource("BannerWarningForeground");
         }
     }
 

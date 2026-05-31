@@ -5,229 +5,245 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:zapret_gui"
         mc:Ignorable="d"
-        Title="zapret-gui" Height="700" Width="520"
-        MinHeight="560" MinWidth="520"
+        Title="zapret-gui" Height="720" Width="540"
+        MinHeight="580" MinWidth="530"
         Loaded="MainWindow_Loaded">
-    <Grid Margin="16">
+    <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Style="{StaticResource SectionTitle}"
+                       Text="zapret-gui"
+                       VerticalAlignment="Center"/>
+            <ComboBox x:Name="LanguageComboBox"
+                      Style="{StaticResource RoundedComboBox}"
+                      HorizontalAlignment="Right"
+                      VerticalAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      Width="100"
+                      SelectionChanged="LanguageComboBox_SelectionChanged">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal"
+                                    VerticalAlignment="Center">
+                            <Image Source="{Binding FlagIcon}"
+                                   Width="{x:Static local:FlagIcons.DisplayWidth}"
+                                   Height="{x:Static local:FlagIcons.DisplayHeight}"
+                                   Margin="0,0,8,0"
+                                   VerticalAlignment="Center"
+                                   RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <TextBlock Text="{Binding Code}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+        </Grid>
+
+        <!-- Service status -->
         <Border x:Name="ServiceRunningBanner"
-                Grid.Row="0"
+                Grid.Row="1"
+                Style="{StaticResource StatusBanner}"
                 Visibility="Collapsed"
-                Background="#D1E7DD"
-                BorderBrush="#A3CFBB"
-                BorderThickness="1"
-                Padding="12,8"
-                Margin="0,0,0,8"
-                CornerRadius="4">
+                Background="{StaticResource BannerSuccessBackground}"
+                BorderBrush="{StaticResource BannerSuccessBorder}"
+                Margin="0,0,0,12">
             <TextBlock x:Name="ServiceRunningBannerText"
                        TextWrapping="Wrap"
-                       Foreground="#0F5132"
+                       Foreground="{StaticResource BannerSuccessForeground}"
                        HorizontalAlignment="Center"
                        FontWeight="SemiBold"/>
         </Border>
 
-        <ComboBox x:Name="LanguageComboBox"
-                  Grid.Row="1"
-                  HorizontalAlignment="Right"
-                  VerticalAlignment="Top"
-                  Width="96"
-                  Margin="0,0,0,8"
-                  SelectionChanged="LanguageComboBox_SelectionChanged">
-            <ComboBox.ItemTemplate>
-                <DataTemplate>
-                    <StackPanel Orientation="Horizontal">
-                        <Image Source="{Binding FlagIcon}"
-                               Width="22"
-                               Height="15"
-                               Margin="0,0,6,0"
-                               RenderOptions.BitmapScalingMode="HighQuality"/>
-                        <TextBlock Text="{Binding Code}"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
-                </DataTemplate>
-            </ComboBox.ItemTemplate>
-        </ComboBox>
+        <!-- Primary actions -->
+        <Border Grid.Row="2"
+                Style="{StaticResource CardBorder}"
+                Margin="0,0,0,16">
+            <StackPanel HorizontalAlignment="Center">
+                <Button x:Name="DoEverythingButton"
+                        Style="{StaticResource GreenRoundButton}"
+                        Margin="0,0,0,10"
+                        Click="DoEverythingButton_Click"/>
 
-        <Button x:Name="DoEverythingButton"
-                Grid.Row="2"
-                Padding="16,10"
-                Margin="0,0,0,8"
-                HorizontalAlignment="Stretch"
-                Click="DoEverythingButton_Click"/>
+                <Button x:Name="TurnOffButton"
+                        Style="{StaticResource DangerButton}"
+                        HorizontalAlignment="Center"
+                        Click="TurnOffButton_Click"/>
+            </StackPanel>
+        </Border>
 
-        <Button x:Name="TurnOffButton"
-                Grid.Row="3"
-                Padding="16,10"
-                Margin="0,0,0,12"
-                HorizontalAlignment="Stretch"
-                Click="TurnOffButton_Click"/>
-
-        <ScrollViewer Grid.Row="4"
+        <!-- Advanced + output -->
+        <ScrollViewer Grid.Row="3"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
-                <Expander x:Name="AdvancedExpander"
-                          IsExpanded="False">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  MinHeight="240">
-                        <Grid MinWidth="456">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
+                <Border Style="{StaticResource CardBorder}"
+                        Margin="0,0,0,12">
+                    <Expander x:Name="AdvancedExpander"
+                              IsExpanded="False">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      MinHeight="240">
+                            <Grid MinWidth="420">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
 
-                            <Border x:Name="UpdateBanner"
-                                    Grid.Row="0"
-                                    Visibility="Collapsed"
-                                    Background="#FFF3CD"
-                                    BorderBrush="#FFE69C"
-                                    BorderThickness="1"
-                                    Padding="12,8"
-                                    Margin="0,0,0,12"
-                                    CornerRadius="4">
-                                <TextBlock x:Name="UpdateBannerText" TextWrapping="Wrap"/>
-                            </Border>
+                                <Border x:Name="UpdateBanner"
+                                        Grid.Row="0"
+                                        Style="{StaticResource StatusBanner}"
+                                        Visibility="Collapsed"
+                                        Background="{StaticResource BannerWarningBackground}"
+                                        BorderBrush="{StaticResource BannerWarningBorder}"
+                                        Margin="0,0,0,12">
+                                    <TextBlock x:Name="UpdateBannerText"
+                                               TextWrapping="Wrap"
+                                               Foreground="{StaticResource BannerWarningForeground}"/>
+                                </Border>
 
-                            <Label x:Name="PathToZapretLabel"
-                                   Grid.Row="1"
-                                   Padding="0,0,0,4"/>
+                                <Label x:Name="PathToZapretLabel"
+                                       Grid.Row="1"
+                                       Padding="0,0,0,4"/>
 
-                            <Grid Grid.Row="2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
+                                <Grid Grid.Row="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
 
-                                <TextBox x:Name="ZapretPathTextBox"
-                                         Grid.Column="0"
-                                         Margin="0,0,8,0"
-                                         VerticalContentAlignment="Center"
-                                         LostFocus="ZapretPathTextBox_LostFocus"
-                                         KeyDown="ZapretPathTextBox_KeyDown"/>
+                                    <TextBox x:Name="ZapretPathTextBox"
+                                             Grid.Column="0"
+                                             Margin="0,0,8,0"
+                                             LostFocus="ZapretPathTextBox_LostFocus"
+                                             KeyDown="ZapretPathTextBox_KeyDown"/>
 
-                                <Button x:Name="BrowseButton"
-                                        Grid.Column="1"
-                                        Padding="12,4"
-                                        Click="BrowseButton_Click"/>
+                                    <Button x:Name="BrowseButton"
+                                            Grid.Column="1"
+                                            Padding="14,8"
+                                            Click="BrowseButton_Click"/>
+                                </Grid>
+
+                                <StackPanel Grid.Row="3"
+                                            Orientation="Horizontal"
+                                            Margin="0,16,0,0">
+                                    <Button x:Name="CheckForUpdateButton"
+                                            Margin="0,0,8,0"
+                                            Click="CheckForUpdateButton_Click"/>
+                                    <Button x:Name="UpdateButton"
+                                            Click="UpdateButton_Click"/>
+                                </StackPanel>
+
+                                <TabControl Grid.Row="4"
+                                            Margin="0,16,0,0"
+                                            MinHeight="160">
+                                    <TabItem x:Name="ServiceTab">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                      Padding="4,8,4,4">
+                                            <StackPanel>
+                                                <TextBlock x:Name="InstalledStrategyTextBlock"
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           Margin="0,0,0,8"/>
+
+                                                <Label x:Name="StrategyForInstallLabel"
+                                                       Padding="0,0,0,4"/>
+                                                <ComboBox x:Name="StrategyComboBox"
+                                                          Margin="0,0,40,12"
+                                                          IsEditable="False"/>
+
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button x:Name="InstallServiceButton"
+                                                            Margin="0,0,8,0"
+                                                            Click="InstallServiceButton_Click"/>
+                                                    <Button x:Name="RemoveServiceButton"
+                                                            Margin="0,0,8,0"
+                                                            Click="RemoveServiceButton_Click"/>
+                                                    <Button x:Name="CheckStatusButton"
+                                                            Click="CheckStatusButton_Click"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </TabItem>
+
+                                    <TabItem x:Name="ListsTab">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                      Padding="4,8,4,4">
+                                            <StackPanel>
+                                                <TextBlock x:Name="IpSetTimestampTextBlock"
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           Margin="0,0,0,4"/>
+                                                <TextBlock x:Name="HostsTimestampTextBlock"
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           Margin="0,0,0,12"/>
+
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button x:Name="UpdateIpSetListButton"
+                                                            Margin="0,0,8,0"
+                                                            Click="UpdateIpSetListButton_Click"/>
+                                                    <Button x:Name="UpdateHostsFileButton"
+                                                            Click="UpdateHostsFileButton_Click"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </TabItem>
+
+                                    <TabItem x:Name="DiagnosticsTab">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                      Padding="4,8,4,4">
+                                            <StackPanel>
+                                                <TextBlock x:Name="ConnectivityTestsHintTextBlock"
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           Margin="0,0,0,12"/>
+
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button x:Name="RunDiagnosticsButton"
+                                                            Margin="0,0,8,0"
+                                                            Click="RunDiagnosticsButton_Click"/>
+                                                    <Button x:Name="RunConnectivityTestsButton"
+                                                            Margin="0,0,8,0"
+                                                            Click="RunConnectivityTestsButton_Click"/>
+                                                    <Button x:Name="CancelZapretOperationButton"
+                                                            Visibility="Collapsed"
+                                                            Click="CancelZapretOperationButton_Click"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </TabItem>
+                                </TabControl>
                             </Grid>
+                        </ScrollViewer>
+                    </Expander>
+                </Border>
 
-                            <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
-                                <Button x:Name="CheckForUpdateButton"
-                                        Padding="12,4"
-                                        Margin="0,0,8,0"
-                                        Click="CheckForUpdateButton_Click"/>
-                                <Button x:Name="UpdateButton"
-                                        Padding="12,4"
-                                        Click="UpdateButton_Click"/>
-                            </StackPanel>
+                <Border Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <Label x:Name="OutputLabel"
+                               Padding="0,0,0,8"/>
 
-                            <TabControl Grid.Row="4"
-                                        Margin="0,16,0,0"
-                                        MinHeight="160">
-                                <TabItem x:Name="ServiceTab">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                                        <StackPanel>
-                                            <TextBlock x:Name="InstalledStrategyTextBlock"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,0,0,8"/>
-
-                                            <Label x:Name="StrategyForInstallLabel"
-                                                   Padding="0,0,0,4"/>
-                                            <ComboBox x:Name="StrategyComboBox"
-                                                      Margin="0,0,0,12"
-                                                      IsEditable="False"/>
-
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button x:Name="InstallServiceButton"
-                                                        Padding="12,4"
-                                                        Margin="0,0,8,0"
-                                                        Click="InstallServiceButton_Click"/>
-                                                <Button x:Name="RemoveServiceButton"
-                                                        Padding="12,4"
-                                                        Margin="0,0,8,0"
-                                                        Click="RemoveServiceButton_Click"/>
-                                                <Button x:Name="CheckStatusButton"
-                                                        Padding="12,4"
-                                                        Click="CheckStatusButton_Click"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </ScrollViewer>
-                                </TabItem>
-
-                                <TabItem x:Name="ListsTab">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                                        <StackPanel>
-                                            <TextBlock x:Name="IpSetTimestampTextBlock"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,0,0,4"/>
-                                            <TextBlock x:Name="HostsTimestampTextBlock"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,0,0,12"/>
-
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button x:Name="UpdateIpSetListButton"
-                                                        Padding="12,4"
-                                                        Margin="0,0,8,0"
-                                                        Click="UpdateIpSetListButton_Click"/>
-                                                <Button x:Name="UpdateHostsFileButton"
-                                                        Padding="12,4"
-                                                        Click="UpdateHostsFileButton_Click"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </ScrollViewer>
-                                </TabItem>
-
-                                <TabItem x:Name="DiagnosticsTab">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4">
-                                        <StackPanel>
-                                            <TextBlock x:Name="ConnectivityTestsHintTextBlock"
-                                                       TextWrapping="Wrap"
-                                                       Margin="0,0,0,12"/>
-
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button x:Name="RunDiagnosticsButton"
-                                                        Padding="12,4"
-                                                        Margin="0,0,8,0"
-                                                        Click="RunDiagnosticsButton_Click"/>
-                                                <Button x:Name="RunConnectivityTestsButton"
-                                                        Padding="12,4"
-                                                        Margin="0,0,8,0"
-                                                        Click="RunConnectivityTestsButton_Click"/>
-                                                <Button x:Name="CancelZapretOperationButton"
-                                                        Padding="12,4"
-                                                        Visibility="Collapsed"
-                                                        Click="CancelZapretOperationButton_Click"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </ScrollViewer>
-                                </TabItem>
-                            </TabControl>
-                        </Grid>
-                    </ScrollViewer>
-                </Expander>
-
-                <Label x:Name="OutputLabel"
-                       Padding="0,12,0,4"/>
-
-                <TextBox x:Name="ServiceOutputTextBox"
-                         MinHeight="120"
-                         MaxHeight="200"
-                         IsReadOnly="True"
-                         TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto"
-                         FontFamily="Consolas"
-                         Padding="8,6"/>
+                        <TextBox x:Name="ServiceOutputTextBox"
+                                 MinHeight="120"
+                                 MaxHeight="200"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontFamily="Cascadia Mono, Consolas, Courier New"
+                                 FontSize="12"
+                                 Background="{StaticResource SurfaceMutedBrush}"/>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </ScrollViewer>
     </Grid>
