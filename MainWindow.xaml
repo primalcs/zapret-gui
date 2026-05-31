@@ -18,10 +18,28 @@
 
         <!-- Header -->
         <Grid Grid.Row="0" Margin="0,0,0,16">
-            <TextBlock Style="{StaticResource SectionTitle}"
-                       Text="zapret-gui"
-                       VerticalAlignment="Center"/>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <TextBlock Style="{StaticResource SectionTitle}"
+                           Text="zapret-gui"/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <TextBlock x:Name="AppVersionTextBlock"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               VerticalAlignment="Center"/>
+                    <Button x:Name="CheckAppUpdateButton"
+                            Margin="12,0,0,0"
+                            Padding="8,2"
+                            VerticalAlignment="Center"
+                            Click="CheckAppUpdateButton_Click"/>
+                </StackPanel>
+            </StackPanel>
+
             <ComboBox x:Name="LanguageComboBox"
+                      Grid.Column="1"
                       Style="{StaticResource RoundedComboBox}"
                       HorizontalAlignment="Right"
                       VerticalAlignment="Center"

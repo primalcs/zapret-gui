@@ -43,8 +43,11 @@ public partial class MainWindow : Window
         RegisterZapretActionControl(DoEverythingButton);
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e) =>
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
         RefreshZapretSections();
+        await AppUpdateService.CheckOnStartupAsync(this);
+    }
 
     private async void DoEverythingButton_Click(object sender, RoutedEventArgs e) =>
         await DoEverythingAsync();
@@ -217,6 +220,8 @@ public partial class MainWindow : Window
         try
         {
             Title = Loc.WindowTitle;
+            AppVersionTextBlock.Text = Loc.AppVersionLabel(AppUpdateService.CurrentVersionDisplay);
+            CheckAppUpdateButton.Content = Loc.CheckAppUpdate;
             DoEverythingButton.Content = Loc.DoEverything;
             TurnOffButton.Content = Loc.TurnOff;
             AdvancedExpander.Header = Loc.Advanced;
@@ -286,6 +291,9 @@ public partial class MainWindow : Window
         SaveZapretPath();
         RefreshZapretSections();
     }
+
+    private async void CheckAppUpdateButton_Click(object sender, RoutedEventArgs e) =>
+        await AppUpdateService.CheckAndPromptAsync(this);
 
     private async void CheckForUpdateButton_Click(object sender, RoutedEventArgs e) =>
         await CheckForUpdateAsync();

@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "11.0.x"
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -match '^v(.+)$') {
+            $version = $Matches[1]
+          } else {
+            $version = $tag.TrimStart('v')
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $version"
+
+      - name: Publish application
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $publishDir = "artifacts/publish/win-x64"
+          dotnet publish zapret-gui.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained false `
+            -o $publishDir `
+            /p:Version=$version `
+            /p:AssemblyVersion=$version.0 `
+            /p:FileVersion=$version.0 `
+            /p:InformationalVersion=$version
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $publishDir = Join-Path $PWD "artifacts/publish/win-x64"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc installer/zapret-gui.iss `
+            "/DMyAppVersion=$version" `
+            "/DPublishDir=$publishDir"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/installer/zapret-gui_win-x64_v${{ steps.version.outputs.version }}.exe

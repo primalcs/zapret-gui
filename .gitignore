@@ -14,7 +14,6 @@ x86/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
 bld/
-[Ll]og/
 
 ## .NET
 project.lock.json
@@ -31,17 +30,15 @@ artifacts/
 *.userosscache
 *.sln.docstates
 *.userprefs
+*.pubxml.user
 
 *.pidb
 *.booproj
 *.svclog
 *.scc
 
-## Visual Studio cache/options
-.vscode/*
-!.vscode/extensions.json
-!.vscode/launch.json
-!.vscode/tasks.json
+## Editor (local)
+.vscode/
 
 ## Rider
 .idea/
@@ -65,6 +62,7 @@ coverage*.info
 **/[Pp]ackages/*
 !**/[Pp]ackages/build/
 *.nuget.cache
+nuget.config.user
 
 ## Publish
 publish/
@@ -91,18 +89,52 @@ $RECYCLE.BIN/
 .AppleDouble
 .LSOverride
 
-## Secrets / local config
+## Secrets / credentials / tokens
 *.env
 *.env.*
 !.env.example
+.envrc
+
 secrets.json
-settings.json
-appsettings.*.local.json
+secrets/
+*.secrets.json
+**/usersecrets/
+
+*.credentials
+*.cred
+credential*.json
+*_token.txt
+*.token
+.github-token
+gh-token.txt
+.git-credentials
+
+## Certificates & private keys
 *.pfx
 *.p12
+*.pem
+*.key
+*.snk
+
+## Local app config (paths, language, update prefs)
+settings.json
+settings.*.json
+!settings.json.example
+
+appsettings.*.local.json
+**/appsettings.Development.json
+config.local.json
+*.local.json
+
+## Logs (command output, paths)
+*.log
+zapret-gui.log
+**/zapret-gui.log
+
+## Local zapret tree (if unpacked next to the repo)
+/zapret/
 
 ## Misc
-*.log
 *.tmp
 *.temp
 *.bak

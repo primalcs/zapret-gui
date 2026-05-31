@@ -30,6 +30,39 @@ public static class Loc
 
     public static string WindowTitle => Pick("zapret-gui", "zapret-gui");
 
+    public static string AppVersionLabel(string version) =>
+        Pick($"App v{version}", $"Приложение v{version}");
+
+    public static string CheckAppUpdate => Pick("Check app update", "Проверить обновление приложения");
+
+    public static string AppUpdateTitle => Pick("Application update", "Обновление приложения");
+
+    public static string AppVersionLatest(string version) =>
+        Pick($"Application version {version} is up to date.", $"Версия приложения {version} актуальна.");
+
+    public static string AppNewVersionAvailable(string version) =>
+        Pick(
+            $"A new application version {version} is available. Download and install now?",
+            $"Доступна новая версия приложения {version}. Скачать и установить сейчас?");
+
+    public static string AppDownloading => Pick("Downloading update...", "Загрузка обновления...");
+
+    public static string AppDownloadProgress(double downloadedMb, double totalMb, double percent) =>
+        Pick(
+            $"{downloadedMb:0.##} / {totalMb:0.##} MB ({percent:0.#} %)",
+            $"{downloadedMb:0.##} / {totalMb:0.##} МБ ({percent:0.#} %)");
+
+    public static string AppUpdateCheckFailedTitle =>
+        Pick("Application update check failed", "Ошибка проверки обновления приложения");
+
+    public static string AppUpdateCheckFailedBody(string message) =>
+        Pick(
+            $"Failed to check for application updates.\n\n{message}",
+            $"Не удалось проверить обновления приложения.\n\n{message}");
+
+    public static string AppUpdateDownloadFailed =>
+        Pick("Failed to download the update.", "Не удалось скачать обновление.");
+
     public static string Advanced => Pick("Advanced", "Дополнительно");
 
     public static string DoEverything => Pick("Do everything", "Сделай красиво");

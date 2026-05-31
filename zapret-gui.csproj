@@ -10,10 +10,19 @@
     <UseWindowsForms>true</UseWindowsForms>
     <CETCompat>false</CETCompat>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.1.0</Version>
+    <AssemblyName>zapret-gui</AssemblyName>
+    <RepositoryUrl>https://github.com/primalcs/zapret-gui</RepositoryUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- Fail loudly when zapret-gui.exe is locked (stale apphost → 0xc0000142 with new DLL). -->
     <CopyRetryCount>20</CopyRetryCount>
     <CopyRetryDelayMilliseconds>1000</CopyRetryDelayMilliseconds>
     <ErrorOnCopyRetryFailure>true</ErrorOnCopyRetryFailure>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Updatum" Version="1.4.0" />
+  </ItemGroup>
 
 </Project>
