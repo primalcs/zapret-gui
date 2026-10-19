@@ -10,7 +10,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <CETCompat>false</CETCompat>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <AssemblyName>zapret-gui</AssemblyName>
     <RepositoryUrl>https://github.com/primalcs/zapret-gui</RepositoryUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
