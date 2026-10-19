@@ -130,6 +130,15 @@ public static class Loc
 
     public static string Output => Pick("Output", "Вывод");
 
+    public static string EraseLogFiles => Pick("Erase log files", "Стереть файлы журнала");
+
+    public static string LogsErased(int count) =>
+        count == 1
+            ? Pick("Erased 1 log file. The latest log was kept.", "Удалён 1 файл журнала. Последний журнал сохранён.")
+            : Pick(
+                $"Erased {count} log files. The latest log was kept.",
+                $"Удалено файлов журнала: {count}. Последний журнал сохранён.");
+
     public static string Running => Pick("Running...", "Выполняется...");
 
     public static string Checking => Pick("Checking...", "Проверка...");

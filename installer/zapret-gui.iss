@@ -2,7 +2,7 @@
 ; Build via scripts/build-release.ps1 or GitHub Actions
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.1"
+  #define MyAppVersion "0.1.2"
 #endif
 
 #ifndef PublishDir

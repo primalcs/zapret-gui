@@ -261,6 +261,11 @@
                                  FontFamily="Cascadia Mono, Consolas, Courier New"
                                  FontSize="12"
                                  Background="{StaticResource SurfaceMutedBrush}"/>
+
+                        <Button x:Name="EraseLogFilesButton"
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Left"
+                                Click="EraseLogFilesButton_Click"/>
                     </StackPanel>
                 </Border>
             </StackPanel>

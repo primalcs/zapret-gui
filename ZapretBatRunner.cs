@@ -4,7 +4,7 @@ using System.Text;
 
 namespace zapret_gui;
 
-public readonly record struct ZapretBatResult(int ExitCode, string StdOut, string StdErr)
+public readonly record struct ZapretBatResult(int ExitCode, string StdOut, string StdErr, string LogPath = "")
 {
     public bool Success => ExitCode == 0;
 }
@@ -30,11 +30,53 @@ public sealed class ZapretBatRunner
 
     public IReadOnlyList<string> InstallableBatFiles { get; }
 
-    public static string LogFilePath =>
+    public static string LogDirectory =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "zapret-gui",
-            "zapret-gui.log");
+            "logs");
+
+    public static bool HasExtraLogs()
+    {
+        if (!Directory.Exists(LogDirectory))
+            return false;
+
+        return Directory.EnumerateFiles(LogDirectory, "*.log").Take(2).Count() > 1;
+    }
+
+    /// <summary>
+    /// Deletes every <c>*.log</c> in <see cref="LogDirectory"/> except the newest one.
+    /// </summary>
+    public static int EraseLogsExceptLatest()
+    {
+        if (!Directory.Exists(LogDirectory))
+            return 0;
+
+        var files = new DirectoryInfo(LogDirectory)
+            .EnumerateFiles("*.log")
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .ThenByDescending(file => file.Name, StringComparer.OrdinalIgnoreCase)
+            .Skip(1)
+            .ToList();
+
+        var deleted = 0;
+        foreach (var file in files)
+        {
+            try
+            {
+                file.Delete();
+                deleted++;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return deleted;
+    }
 
     public static bool IsZapretFolder(string path) =>
         Directory.Exists(path) &&
@@ -134,6 +176,7 @@ public sealed class ZapretBatRunner
 
         using var process = new Process { StartInfo = CreateStartInfo(ServiceBatPath, "admin") };
         process.Start();
+        using var killOnCancel = cancellationToken.Register(() => KillProcessTree(process));
 
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
@@ -145,14 +188,15 @@ public sealed class ZapretBatRunner
         var cancelledByUser = false;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(operation == ServiceMenuOperation.Diagnostics ? DiagnosticsTimeout : MenuTimeout);
+        // A blocked pipe read does not observe cancellation. Killing the tree is what unblocks it.
+        using var killOnTimeout = timeout.Token.Register(() => KillProcessTree(process));
 
         try
         {
             var buffer = new char[1024];
             while (!timeout.Token.IsCancellationRequested)
             {
-                var read = await process.StandardOutput
-                    .ReadAsync(buffer.AsMemory(0, buffer.Length), timeout.Token)
+                var read = await ReadChunkAsync(process.StandardOutput, buffer, timeout.Token)
                     .ConfigureAwait(false);
                 if (read == 0)
                     break;
@@ -203,6 +247,9 @@ public sealed class ZapretBatRunner
         }
         finally
         {
+            if (cancelledByUser || cancellationToken.IsCancellationRequested)
+                KillProcessTree(process);
+
             try
             {
                 process.StandardInput.Close();
@@ -210,25 +257,27 @@ public sealed class ZapretBatRunner
             catch
             {
             }
-
-            if (cancelledByUser)
-                KillProcessTree(process);
         }
+
+        if (cancelledByUser || cancellationToken.IsCancellationRequested)
+        {
+            Forget(stderrTask);
+            throw new OperationCanceledException(cancellationToken);
+        }
+
+        // service.bat returns to its menu or pause after the action. Close that process
+        // before waiting on stderr, or the pipe stays open and the UI never leaves "Running...".
+        await WaitForExitAsync(process, DrainAfterComplete).ConfigureAwait(false);
 
         try
         {
-            await stderrTask.ConfigureAwait(false);
+            await stderrTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
         }
-        catch (Exception) when (cancelledByUser || cancellationToken.IsCancellationRequested)
+        catch (TimeoutException)
         {
-            cancelledByUser = true;
             KillProcessTree(process);
+            Forget(stderrTask);
         }
-
-        if (cancelledByUser)
-            throw new OperationCanceledException(cancellationToken);
-
-        await WaitForExitAsync(process, DrainAfterComplete).ConfigureAwait(false);
 
         var stdoutText = stdout.ToString();
         var stderrText = stderr.ToString();
@@ -238,10 +287,10 @@ public sealed class ZapretBatRunner
             stderrText,
             operation);
 
-        await WriteLogAsync(operation, exitCode, stdinLog, stdoutText, stderrText, cancellationToken)
+        var logPath = await WriteLogAsync(operation, exitCode, stdinLog, stdoutText, stderrText, cancellationToken)
             .ConfigureAwait(false);
 
-        return new ZapretBatResult(exitCode, stdoutText, stderrText);
+        return new ZapretBatResult(exitCode, stdoutText, stderrText, logPath);
     }
 
     private static async Task DrainOutputAsync(
@@ -253,21 +302,60 @@ public sealed class ZapretBatRunner
         using var drain = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         drain.CancelAfter(DrainAfterComplete);
 
+        while (!drain.Token.IsCancellationRequested && !process.HasExited)
+        {
+            var read = await ReadChunkAsync(process.StandardOutput, buffer, drain.Token)
+                .ConfigureAwait(false);
+            if (read == 0)
+                break;
+            stdout.Append(buffer, 0, read);
+        }
+    }
+
+    /// <summary>
+    /// Reads one chunk, or returns 0 when <paramref name="cancellationToken"/> fires.
+    /// The pending read is left to finish when the process exits.
+    /// </summary>
+    private static async Task<int> ReadChunkAsync(
+        StreamReader reader,
+        char[] buffer,
+        CancellationToken cancellationToken)
+    {
+        var readTask = reader.ReadAsync(buffer.AsMemory(0, buffer.Length), CancellationToken.None).AsTask();
+        if (readTask.IsCompleted)
+            return await CompleteReadAsync(readTask).ConfigureAwait(false);
+
+        var timeoutTask = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        var winner = await Task.WhenAny(readTask, timeoutTask).ConfigureAwait(false);
+        if (winner == readTask)
+            return await CompleteReadAsync(readTask).ConfigureAwait(false);
+
+        if (readTask.IsCompleted)
+            return await CompleteReadAsync(readTask).ConfigureAwait(false);
+
+        Forget(readTask);
+        return 0;
+    }
+
+    private static async Task<int> CompleteReadAsync(Task<int> readTask)
+    {
         try
         {
-            while (!drain.Token.IsCancellationRequested && !process.HasExited)
-            {
-                var read = await process.StandardOutput
-                    .ReadAsync(buffer.AsMemory(0, buffer.Length), drain.Token)
-                    .ConfigureAwait(false);
-                if (read == 0)
-                    break;
-                stdout.Append(buffer, 0, read);
-            }
+            return await readTask.ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
         {
+            return 0;
         }
+    }
+
+    private static void Forget(Task task)
+    {
+        _ = task.ContinueWith(
+            static t => { _ = t.Exception; },
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private static void KillProcessTree(Process process)
@@ -294,13 +382,11 @@ public sealed class ZapretBatRunner
         }
         catch (OperationCanceledException)
         {
+            KillProcessTree(process);
             try
             {
                 if (!process.HasExited)
-                {
-                    process.Kill();
                     process.WaitForExit(2000);
-                }
             }
             catch
             {
@@ -343,7 +429,7 @@ public sealed class ZapretBatRunner
     private static string DisplayStdin(string line) =>
         line.Length == 0 ? "(Enter)" : line;
 
-    private static async Task WriteLogAsync(
+    private static async Task<string> WriteLogAsync(
         ServiceMenuOperation operation,
         int exitCode,
         IReadOnlyList<string> stdinLog,
@@ -353,8 +439,8 @@ public sealed class ZapretBatRunner
     {
         try
         {
-            var logDir = Path.GetDirectoryName(LogFilePath)!;
-            Directory.CreateDirectory(logDir);
+            Directory.CreateDirectory(LogDirectory);
+            var path = Path.Combine(LogDirectory, $"{DateTime.Now:yyyy-MM-dd_HHmmss_fff}_{operation}.log");
 
             var log = new StringBuilder()
                 .AppendLine($"--- {DateTime.Now:O} {operation} exit={exitCode} ---")
@@ -366,10 +452,12 @@ public sealed class ZapretBatRunner
                 .AppendLine(stderr)
                 .AppendLine();
 
-            await File.AppendAllTextAsync(LogFilePath, log.ToString(), cancellationToken).ConfigureAwait(false);
+            await File.WriteAllTextAsync(path, log.ToString(), cancellationToken).ConfigureAwait(false);
+            return path;
         }
         catch
         {
+            return "";
         }
     }
 

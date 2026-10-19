@@ -44,6 +44,7 @@ public partial class MainWindow : Window
         RegisterZapretActionControl(RunDiagnosticsButton);
         RegisterZapretActionControl(RunConnectivityTestsButton);
         RegisterZapretActionControl(DoEverythingButton);
+        RegisterZapretActionControl(EraseLogFilesButton);
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -72,12 +73,6 @@ public partial class MainWindow : Window
         RefreshZapretSections();
         AdvancedExpander.IsExpanded = true;
 
-        var previousStrategy = ZapretBatRunner.IsZapretFolder(zapretPath)
-            ? ZapretServiceCommands.ReadInstalledStrategy()
-            : null;
-        var servicesChanged = false;
-        var cancelled = false;
-
         SetBusy(true);
         ServiceOutputTextBox.Text = Loc.Running;
         _zapretOperationCts = new CancellationTokenSource();
@@ -87,10 +82,7 @@ public partial class MainWindow : Window
         try
         {
             if (ZapretBatRunner.IsZapretFolder(zapretPath))
-            {
-                servicesChanged = true;
                 await RemoveServicesQuietlyAsync(cancellationToken);
-            }
 
             if (!await CheckAndUpdateIfNeededAsync(zapretPath, cancellationToken, manageBusy: false))
                 return;
@@ -102,7 +94,6 @@ public partial class MainWindow : Window
             if (!runner.ValidateFolderOrWarn())
                 return;
 
-            servicesChanged = true;
             await RemoveServicesQuietlyAsync(cancellationToken);
 
             var strategyCount = runner.InstallableBatFiles.Count;
@@ -165,62 +156,18 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            cancelled = true;
             if (UpdateBannerText.Text != Loc.UpdatedSuccessfully)
                 UpdateBanner.Visibility = Visibility.Collapsed;
             ServiceOutputTextBox.Text = Loc.OperationCancelled;
         }
         finally
         {
-            if (cancelled && servicesChanged)
-            {
-                DoEverythingButton.IsEnabled = false;
-                try
-                {
-                    await RestoreDoEverythingServicesAsync(GetZapretPath(), previousStrategy);
-                    var details = ServiceOutputTextBox.Text;
-                    ServiceOutputTextBox.Text = string.IsNullOrWhiteSpace(details) || details == Loc.OperationCancelled
-                        ? Loc.OperationCancelled
-                        : Loc.OperationCancelled + Environment.NewLine + Environment.NewLine + details;
-                }
-                catch (Exception ex)
-                {
-                    ServiceOutputTextBox.Text =
-                        Loc.OperationCancelled + Environment.NewLine + Environment.NewLine + ex.Message;
-                }
-            }
-
             SetDoEverythingRunningUi(false);
             _zapretOperationCts?.Dispose();
             _zapretOperationCts = null;
             SetBusy(false);
             RefreshZapretSections();
         }
-    }
-
-    private async Task RestoreDoEverythingServicesAsync(string zapretPath, string? previousStrategy)
-    {
-        if (!ZapretBatRunner.IsZapretFolder(zapretPath))
-            return;
-
-        if (!string.IsNullOrWhiteSpace(previousStrategy) &&
-            ZapretServiceCommands.GetInstallMenuIndex(zapretPath, previousStrategy) is not null)
-        {
-            var installResult = await RunZapretBatAsync(
-                (runner, ct) => ZapretServiceCommands.InstallServiceAsync(runner, previousStrategy, ct),
-                showErrors: false,
-                manageBusy: false);
-            if (installResult is not null)
-                SetZapretOutput(Loc.InstallService, installResult.Value, ServiceMenuOperation.Install);
-            return;
-        }
-
-        var removeResult = await RunZapretBatAsync(
-            (runner, ct) => ZapretServiceCommands.RemoveServicesAsync(runner, ct),
-            showErrors: false,
-            manageBusy: false);
-        if (removeResult is not null)
-            SetZapretOutput(Loc.RemoveServices, removeResult.Value, ServiceMenuOperation.Remove);
     }
 
     private async Task RemoveServicesQuietlyAsync(CancellationToken cancellationToken)
@@ -327,6 +274,7 @@ public partial class MainWindow : Window
             RunConnectivityTestsButton.Content = Loc.RunConnectivityTests;
             CancelZapretOperationButton.Content = Loc.Cancel;
             OutputLabel.Content = Loc.Output;
+            EraseLogFilesButton.Content = Loc.EraseLogFiles;
 
             if (_runningZapretButton is not null)
                 _runningZapretButton.Content = Loc.Running;
@@ -645,8 +593,13 @@ public partial class MainWindow : Window
                 continue;
             }
 
+            if (ReferenceEquals(control, EraseLogFilesButton))
+                continue;
+
             control.IsEnabled = !busy;
         }
+
+        RefreshEraseLogsButton();
     }
 
     private void SetUpdateBusy(bool busy, string? checkButtonText = null) =>
@@ -770,6 +723,17 @@ public partial class MainWindow : Window
         RefreshServiceSection();
         RefreshListsSection();
         RefreshDiagnosticsSection();
+        RefreshEraseLogsButton();
+    }
+
+    private void RefreshEraseLogsButton() =>
+        EraseLogFilesButton.IsEnabled = !_isBusy && ZapretBatRunner.HasExtraLogs();
+
+    private void EraseLogFilesButton_Click(object sender, RoutedEventArgs e)
+    {
+        var deleted = ZapretBatRunner.EraseLogsExceptLatest();
+        ServiceOutputTextBox.Text = Loc.LogsErased(deleted);
+        RefreshEraseLogsButton();
     }
 
     private void RefreshServiceRunningBanner()
@@ -930,10 +894,15 @@ public partial class MainWindow : Window
 
     private void SetZapretOutput(string action, ZapretBatResult result, ServiceMenuOperation operation)
     {
-        ServiceOutputTextBox.Text =
+        var text =
             $"{Loc.OutputHeader(action)}{Environment.NewLine}" +
-            $"{ZapretServiceCommands.FormatOutput(result, operation)}{Environment.NewLine}{Environment.NewLine}" +
-            Loc.LogLine(ZapretBatRunner.LogFilePath);
+            ZapretServiceCommands.FormatOutput(result, operation);
+        if (!string.IsNullOrEmpty(result.LogPath))
+        {
+            text += $"{Environment.NewLine}{Environment.NewLine}{Loc.LogLine(result.LogPath)}";
+        }
+
+        ServiceOutputTextBox.Text = text;
     }
 
     private string GetZapretPath() =>

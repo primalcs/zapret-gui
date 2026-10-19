@@ -516,7 +516,10 @@ public static class ZapretServiceCommands
 
     private static bool IsRemoveLine(string line) =>
         line.Contains("sc delete", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("DeleteService", StringComparison.OrdinalIgnoreCase) ||
         line.Contains("net stop", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("stopped successfully", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("остановлен", StringComparison.OrdinalIgnoreCase) ||
         line.Contains("taskkill", StringComparison.OrdinalIgnoreCase) ||
         line.Contains("is not installed", StringComparison.OrdinalIgnoreCase) ||
         line.Contains("WinDivert", StringComparison.OrdinalIgnoreCase) ||
@@ -558,11 +561,16 @@ public static class ZapretServiceCommands
         line.Contains("test zapret", StringComparison.OrdinalIgnoreCase);
 
     private static bool HasRemoveOutput(string output) =>
+        output.Contains("DeleteService", StringComparison.OrdinalIgnoreCase) ||
         output.Contains("sc delete", StringComparison.OrdinalIgnoreCase) ||
         (output.Contains("is not installed", StringComparison.OrdinalIgnoreCase) &&
          output.Contains("zapret", StringComparison.OrdinalIgnoreCase)) ||
         output.Contains("taskkill", StringComparison.OrdinalIgnoreCase) ||
         (output.Contains("net stop", StringComparison.OrdinalIgnoreCase) &&
+         output.Contains("zapret", StringComparison.OrdinalIgnoreCase)) ||
+        (output.Contains("stopped successfully", StringComparison.OrdinalIgnoreCase) &&
+         output.Contains("zapret", StringComparison.OrdinalIgnoreCase)) ||
+        (output.Contains("успешно остановлена", StringComparison.OrdinalIgnoreCase) &&
          output.Contains("zapret", StringComparison.OrdinalIgnoreCase));
 
     private static bool HasStatusReport(string output) =>
