@@ -10,6 +10,7 @@ public partial class MainWindow : Window
 {
     private GitHubRelease? _latestRelease;
     private bool _isBusy;
+    private bool _doEverythingRunning;
     private CancellationTokenSource? _bannerHideCts;
     private readonly List<UIElement> _zapretActionControls = [];
     private CancellationTokenSource? _zapretOperationCts;
@@ -29,7 +30,9 @@ public partial class MainWindow : Window
 
         ApplyLocalization();
         ZapretPathTextBox.Text = App.Settings.ZapretPath;
-        UpdateInstalledVersionFromFolder(App.Settings.ZapretPath);
+        if (!string.IsNullOrWhiteSpace(App.Settings.ZapretPath))
+            AdoptInstalledFolder(App.Settings.ZapretPath);
+        UpdateInstalledVersionFromFolder(GetZapretPath());
 
         RegisterZapretActionControl(InstallServiceButton);
         RegisterZapretActionControl(RemoveServiceButton);
@@ -49,36 +52,57 @@ public partial class MainWindow : Window
         await AppUpdateService.CheckOnStartupAsync(this);
     }
 
-    private async void DoEverythingButton_Click(object sender, RoutedEventArgs e) =>
+    private async void DoEverythingButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_doEverythingRunning)
+        {
+            _zapretOperationCts?.Cancel();
+            return;
+        }
+
         await DoEverythingAsync();
+    }
 
     private async Task DoEverythingAsync()
     {
         if (_isBusy)
             return;
 
-        var zapretPath = ResolveDoEverythingZapretPath();
+        var zapretPath = AdoptInstalledFolder(ResolveDoEverythingZapretPath());
         RefreshZapretSections();
         AdvancedExpander.IsExpanded = true;
+
+        var previousStrategy = ZapretBatRunner.IsZapretFolder(zapretPath)
+            ? ZapretServiceCommands.ReadInstalledStrategy()
+            : null;
+        var servicesChanged = false;
+        var cancelled = false;
 
         SetBusy(true);
         ServiceOutputTextBox.Text = Loc.Running;
         _zapretOperationCts = new CancellationTokenSource();
-        SetZapretOperationUi(DoEverythingButton, isRunning: true);
+        SetDoEverythingRunningUi(true);
         var cancellationToken = _zapretOperationCts.Token;
 
         try
         {
             if (ZapretBatRunner.IsZapretFolder(zapretPath))
+            {
+                servicesChanged = true;
                 await RemoveServicesQuietlyAsync(cancellationToken);
+            }
 
             if (!await CheckAndUpdateIfNeededAsync(zapretPath, cancellationToken, manageBusy: false))
                 return;
 
+            cancellationToken.ThrowIfCancellationRequested();
+
+            zapretPath = GetZapretPath();
             var runner = new ZapretBatRunner(zapretPath);
             if (!runner.ValidateFolderOrWarn())
                 return;
 
+            servicesChanged = true;
             await RemoveServicesQuietlyAsync(cancellationToken);
 
             var strategyCount = runner.InstallableBatFiles.Count;
@@ -97,6 +121,8 @@ public partial class MainWindow : Window
                 if (installResult is null)
                     return;
 
+                cancellationToken.ThrowIfCancellationRequested();
+
                 SetZapretOutput(
                     Loc.InstallService,
                     installResult.Value,
@@ -110,38 +136,91 @@ public partial class MainWindow : Window
                 if (statusResult is null)
                     return;
 
+                cancellationToken.ThrowIfCancellationRequested();
+
                 SetZapretOutput(Loc.CheckStatus, statusResult.Value, ServiceMenuOperation.CheckStatus);
 
                 if (ZapretServiceCommands.IsServiceRunningSuccessfully(statusResult.Value))
                 {
-                    await ShowBannerBrieflyAsync(Loc.DoEverythingSuccess, isSuccess: true);
+                    await ShowBannerBrieflyAsync(Loc.DoEverythingSuccess, isSuccess: true, cancellationToken);
                     succeeded = true;
                     break;
                 }
 
                 await ShowBannerBrieflyAsync(
                     Loc.DoEverythingServiceFailed(serviceNumber),
-                    isSuccess: false);
+                    isSuccess: false,
+                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
 
                 if (serviceNumber < strategyCount)
                     await RemoveServicesQuietlyAsync(cancellationToken);
             }
 
             if (!succeeded)
-                await ShowBannerBrieflyAsync(Loc.DoEverythingFailed, isSuccess: false);
+            {
+                await ShowBannerBrieflyAsync(Loc.DoEverythingFailed, isSuccess: false, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
         }
         catch (OperationCanceledException)
         {
+            cancelled = true;
+            if (UpdateBannerText.Text != Loc.UpdatedSuccessfully)
+                UpdateBanner.Visibility = Visibility.Collapsed;
             ServiceOutputTextBox.Text = Loc.OperationCancelled;
         }
         finally
         {
-            SetZapretOperationUi(DoEverythingButton, isRunning: false);
+            if (cancelled && servicesChanged)
+            {
+                DoEverythingButton.IsEnabled = false;
+                try
+                {
+                    await RestoreDoEverythingServicesAsync(GetZapretPath(), previousStrategy);
+                    var details = ServiceOutputTextBox.Text;
+                    ServiceOutputTextBox.Text = string.IsNullOrWhiteSpace(details) || details == Loc.OperationCancelled
+                        ? Loc.OperationCancelled
+                        : Loc.OperationCancelled + Environment.NewLine + Environment.NewLine + details;
+                }
+                catch (Exception ex)
+                {
+                    ServiceOutputTextBox.Text =
+                        Loc.OperationCancelled + Environment.NewLine + Environment.NewLine + ex.Message;
+                }
+            }
+
+            SetDoEverythingRunningUi(false);
             _zapretOperationCts?.Dispose();
             _zapretOperationCts = null;
             SetBusy(false);
             RefreshZapretSections();
         }
+    }
+
+    private async Task RestoreDoEverythingServicesAsync(string zapretPath, string? previousStrategy)
+    {
+        if (!ZapretBatRunner.IsZapretFolder(zapretPath))
+            return;
+
+        if (!string.IsNullOrWhiteSpace(previousStrategy) &&
+            ZapretServiceCommands.GetInstallMenuIndex(zapretPath, previousStrategy) is not null)
+        {
+            var installResult = await RunZapretBatAsync(
+                (runner, ct) => ZapretServiceCommands.InstallServiceAsync(runner, previousStrategy, ct),
+                showErrors: false,
+                manageBusy: false);
+            if (installResult is not null)
+                SetZapretOutput(Loc.InstallService, installResult.Value, ServiceMenuOperation.Install);
+            return;
+        }
+
+        var removeResult = await RunZapretBatAsync(
+            (runner, ct) => ZapretServiceCommands.RemoveServicesAsync(runner, ct),
+            showErrors: false,
+            manageBusy: false);
+        if (removeResult is not null)
+            SetZapretOutput(Loc.RemoveServices, removeResult.Value, ServiceMenuOperation.Remove);
     }
 
     private async Task RemoveServicesQuietlyAsync(CancellationToken cancellationToken)
@@ -153,6 +232,7 @@ public partial class MainWindow : Window
             cancellationToken: cancellationToken);
         if (removeResult is not null)
             SetZapretOutput(Loc.RemoveServices, removeResult.Value, ServiceMenuOperation.Remove);
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private async Task<bool> CheckAndUpdateIfNeededAsync(
@@ -176,14 +256,16 @@ public partial class MainWindow : Window
             if (string.IsNullOrWhiteSpace(downloadUrl))
                 throw new InvalidOperationException(Loc.LatestReleaseNoZip);
 
+            var extractDirectory = ZapretBatRunner.GetExtractDirectory(destinationPath);
             await ReleaseUpdateService.DownloadAndExtractAsync(
                 downloadUrl,
-                destinationPath,
+                extractDirectory,
                 cancellationToken);
+            AdoptInstalledFolder(extractDirectory, _latestRelease.TagName);
 
             App.Settings.InstalledVersion = _latestRelease.TagName;
             SettingsStore.Save(App.Settings);
-            await ShowBannerBrieflyAsync(Loc.UpdatedSuccessfully, isSuccess: true);
+            await ShowBannerBrieflyAsync(Loc.UpdatedSuccessfully, isSuccess: true, cancellationToken);
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -222,7 +304,9 @@ public partial class MainWindow : Window
             Title = Loc.WindowTitle;
             AppVersionTextBlock.Text = Loc.AppVersionLabel(AppUpdateService.CurrentVersionDisplay);
             CheckAppUpdateButton.Content = Loc.CheckAppUpdate;
-            DoEverythingButton.Content = Loc.DoEverything;
+            DoEverythingButton.Content = _doEverythingRunning ? Loc.Stop : Loc.DoEverything;
+            if (_doEverythingRunning)
+                DoEverythingButton.IsEnabled = true;
             TurnOffButton.Content = Loc.TurnOff;
             AdvancedExpander.Header = Loc.Advanced;
             PathToZapretLabel.Content = Loc.PathToZapret;
@@ -357,7 +441,9 @@ public partial class MainWindow : Window
             if (string.IsNullOrWhiteSpace(downloadUrl))
                 throw new InvalidOperationException(Loc.LatestReleaseNoZip);
 
-            await ReleaseUpdateService.DownloadAndExtractAsync(downloadUrl, destinationPath);
+            var extractDirectory = ZapretBatRunner.GetExtractDirectory(destinationPath);
+            await ReleaseUpdateService.DownloadAndExtractAsync(downloadUrl, extractDirectory);
+            AdoptInstalledFolder(extractDirectory, _latestRelease.TagName);
 
             App.Settings.InstalledVersion = _latestRelease.TagName;
             SettingsStore.Save(App.Settings);
@@ -374,14 +460,18 @@ public partial class MainWindow : Window
         finally
         {
             SetUpdateBusy(false);
+            RefreshZapretSections();
         }
     }
 
-    private Task ShowBannerBrieflyAsync(string message, bool isSuccess = true)
+    private Task ShowBannerBrieflyAsync(
+        string message,
+        bool isSuccess = true,
+        CancellationToken cancellationToken = default)
     {
         _bannerHideCts?.Cancel();
         _bannerHideCts = new CancellationTokenSource();
-        var cancellationToken = _bannerHideCts.Token;
+        var bannerToken = _bannerHideCts.Token;
 
         SetBannerStyle(isSuccess);
         UpdateBannerText.Text = message;
@@ -391,7 +481,8 @@ public partial class MainWindow : Window
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(bannerToken, cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(3), linked.Token);
                 await Dispatcher.InvokeAsync(() => UpdateBanner.Visibility = Visibility.Collapsed);
             }
             catch (OperationCanceledException)
@@ -511,6 +602,21 @@ public partial class MainWindow : Window
         CancelZapretOperationButton.Visibility = Visibility.Collapsed;
     }
 
+    private void SetDoEverythingRunningUi(bool running)
+    {
+        _doEverythingRunning = running;
+        if (running)
+        {
+            DoEverythingButton.Style = (Style)FindResource("StopRoundButton");
+            DoEverythingButton.Content = Loc.Stop;
+            DoEverythingButton.IsEnabled = true;
+            return;
+        }
+
+        DoEverythingButton.Style = (Style)FindResource("GreenRoundButton");
+        DoEverythingButton.Content = Loc.DoEverything;
+    }
+
     private static void ShowZapretBatError(ZapretBatResult result)
     {
         System.Windows.MessageBox.Show(
@@ -523,15 +629,24 @@ public partial class MainWindow : Window
     private void SetBusy(bool busy)
     {
         _isBusy = busy;
+        var doEverythingEnabled = !busy || _doEverythingRunning;
         CheckForUpdateButton.IsEnabled = !busy;
         UpdateButton.IsEnabled = !busy;
         BrowseButton.IsEnabled = !busy;
         ZapretPathTextBox.IsEnabled = !busy;
-        DoEverythingButton.IsEnabled = !busy;
+        DoEverythingButton.IsEnabled = doEverythingEnabled;
         LanguageComboBox.IsEnabled = !busy;
 
         foreach (var control in _zapretActionControls)
+        {
+            if (ReferenceEquals(control, DoEverythingButton))
+            {
+                control.IsEnabled = doEverythingEnabled;
+                continue;
+            }
+
             control.IsEnabled = !busy;
+        }
     }
 
     private void SetUpdateBusy(bool busy, string? checkButtonText = null) =>
@@ -569,6 +684,18 @@ public partial class MainWindow : Window
 
         App.Settings.ZapretPath = path;
         SettingsStore.Save(App.Settings);
+    }
+
+    private string AdoptInstalledFolder(string path, string? releaseTag = null)
+    {
+        var resolved = ZapretBatRunner.ResolveInstalledFolder(path, releaseTag);
+        if (!string.Equals(GetZapretPath(), resolved, StringComparison.OrdinalIgnoreCase))
+        {
+            ZapretPathTextBox.Text = resolved;
+            SaveZapretPath();
+        }
+
+        return resolved;
     }
 
     private async void InstallServiceButton_Click(object sender, RoutedEventArgs e) =>

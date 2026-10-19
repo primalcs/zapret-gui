@@ -19,6 +19,7 @@
         <Color x:Key="SuccessActionPressedColor">#166534</Color>
         <Color x:Key="DangerColor">#DC2626</Color>
         <Color x:Key="DangerHoverColor">#B91C1C</Color>
+        <Color x:Key="DangerPressedColor">#991B1B</Color>
         <Color x:Key="SuccessBgColor">#DCFCE7</Color>
         <Color x:Key="SuccessBorderColor">#86EFAC</Color>
         <Color x:Key="SuccessTextColor">#166534</Color>
@@ -40,6 +41,7 @@
         <SolidColorBrush x:Key="SuccessActionPressedBrush" Color="{StaticResource SuccessActionPressedColor}"/>
         <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
         <SolidColorBrush x:Key="DangerHoverBrush" Color="{StaticResource DangerHoverColor}"/>
+        <SolidColorBrush x:Key="DangerPressedBrush" Color="{StaticResource DangerPressedColor}"/>
 
         <SolidColorBrush x:Key="BannerSuccessBackground" Color="{StaticResource SuccessBgColor}"/>
         <SolidColorBrush x:Key="BannerSuccessBorder" Color="{StaticResource SuccessBorderColor}"/>
@@ -159,6 +161,45 @@
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="border" Property="Background" Value="{StaticResource SuccessActionPressedBrush}"/>
                                 <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource SuccessActionPressedBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="StopRoundButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="28,28"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="999"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{StaticResource DangerHoverBrush}"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource DangerHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{StaticResource DangerPressedBrush}"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource DangerPressedBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.45"/>

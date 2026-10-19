@@ -67,6 +67,8 @@ public static class Loc
 
     public static string DoEverything => Pick("Do everything", "Сделай красиво");
 
+    public static string Stop => Pick("STOP", "СТОП");
+
     public static string DoEverythingSuccess => Pick("Success", "Сделано");
 
     public static string DoEverythingServiceFailed(int serviceNumber) =>
@@ -209,6 +211,11 @@ public static class Loc
 
     public static string ZapretCommandFailed => Pick("Zapret command failed", "Ошибка команды zapret");
 
+    public static string ServiceMenuNotCompleted =>
+        Pick(
+            "service.bat showed its menu, but the selected action did not run.",
+            "service.bat показал меню, но выбранное действие не выполнилось.");
+
     public static string SelectStrategyFirst =>
         Pick("Select a strategy .bat file first.", "Сначала выберите файл стратегии (.bat).");
 
@@ -228,10 +235,10 @@ public static class Loc
 
     public static string UpdateHostsConfirm(string hostsPath) =>
         Pick(
-            "This runs service.bat option 8, which may open Notepad with zapret hosts entries " +
+            "This runs Update Hosts File in service.bat, which may open Notepad with zapret hosts entries " +
             "for you to merge into the system hosts file:\n\n" +
             $"{hostsPath}\n\nContinue?",
-            "Будет выполнен пункт 8 service.bat — может открыться Блокнот с записями hosts из zapret " +
+            "Будет выполнен пункт Update Hosts File в service.bat — может открыться Блокнот с записями hosts из zapret " +
             "для объединения с системным файлом hosts:\n\n" +
             $"{hostsPath}\n\nПродолжить?");
 
